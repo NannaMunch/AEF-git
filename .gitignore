@@ -12,3 +12,4 @@ mandatory-assignments/MA_1_portfolio_choice_2026.qmd
 .claude/settings.local.json
 data-r/stock_characteristics_monthly.parquet
 data-r/stock_characteristics_monthly.parquet
+.Renviron
