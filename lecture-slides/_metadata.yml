@@ -9,6 +9,7 @@ format: revealjs
 theme: ku_clean.scss
 pdf-separate-fragments: false
 slide-number: false
+lightbox: true
 logo: ku_logo.png
 smaller: true
 html-math-method:
