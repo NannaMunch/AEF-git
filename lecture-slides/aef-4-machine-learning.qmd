@@ -739,6 +739,7 @@ text(model, cex = 0.7)
 - Bootstrap aggregating (Bagging, Breiman 1996) averages predictions across multiple trees, reducing variance and overfitting
 
 Growing a forest
+
 - Build $B$ decision trees $T_1, \ldots, T_B$ using the training sample
 - The bootstrap: Create a bootstrap training set by sampling $N$   observations from the training set with replacement
 - Also: randomly selecting features to be included in the building of each tree
