@@ -111,6 +111,24 @@
       ],
       "Hash": "45f0398006e83a5b10b72a90663d8d8c"
     },
+    "RPostgres": {
+      "Package": "RPostgres",
+      "Version": "1.4.10",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "DBI",
+        "R",
+        "bit64",
+        "blob",
+        "cpp11",
+        "hms",
+        "lubridate",
+        "methods",
+        "withr"
+      ],
+      "Hash": "d30e8baa3875dbb0a2b9444ff2c37211"
+    },
     "Rcpp": {
       "Package": "Rcpp",
       "Version": "1.1.1",
@@ -377,6 +395,24 @@
         "sass"
       ],
       "Hash": "70a6489cc254171fb9b4a7f130f44dca"
+    },
+    "butcher": {
+      "Package": "butcher",
+      "Version": "0.4.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "cli",
+        "lobstr",
+        "methods",
+        "purrr",
+        "rlang",
+        "tibble",
+        "utils",
+        "vctrs"
+      ],
+      "Hash": "c1a736286d618c0eb1cb0009ff7e4111"
     },
     "cachem": {
       "Package": "cachem",
@@ -785,6 +821,30 @@
       ],
       "Hash": "a74597c42c5343764548aee4930e1ee1"
     },
+    "frenchdata": {
+      "Package": "frenchdata",
+      "Version": "0.2.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "assertthat",
+        "cli",
+        "dplyr",
+        "fs",
+        "httr",
+        "magrittr",
+        "purrr",
+        "readr",
+        "rlang",
+        "rvest",
+        "stringr",
+        "tibble",
+        "tidyr",
+        "utils"
+      ],
+      "Hash": "173c415ebb3de1a7e620134ecbbf387f"
+    },
     "fs": {
       "Package": "fs",
       "Version": "1.6.6",
@@ -1168,6 +1228,27 @@
       ],
       "Hash": "ac107251d9d9fd72f0ca8049988f1d7f"
     },
+    "httr2": {
+      "Package": "httr2",
+      "Version": "1.2.2",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "R6",
+        "cli",
+        "curl",
+        "glue",
+        "lifecycle",
+        "magrittr",
+        "openssl",
+        "rappdirs",
+        "rlang",
+        "vctrs",
+        "withr"
+      ],
+      "Hash": "c20959a9442c0e3adb1e8d3809c5d1f7"
+    },
     "ids": {
       "Package": "ids",
       "Version": "1.0.1",
@@ -1420,6 +1501,21 @@
         "zoo"
       ],
       "Hash": "c6fafa6cccb1e1dfe7f7d122efd6e6a7"
+    },
+    "lobstr": {
+      "Package": "lobstr",
+      "Version": "1.2.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "cpp11",
+        "crayon",
+        "methods",
+        "prettyunits",
+        "rlang"
+      ],
+      "Hash": "fff0d4c19e343d9bf6ecc44381f6f1f8"
     },
     "lubridate": {
       "Package": "lubridate",
@@ -2118,6 +2214,19 @@
       ],
       "Hash": "2804ddcd7737082306c559d919886546"
     },
+    "sandwich": {
+      "Package": "sandwich",
+      "Version": "3.1-1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "stats",
+        "utils",
+        "zoo"
+      ],
+      "Hash": "072bb2d27425f2a58fe71fe1080676ce"
+    },
     "sass": {
       "Package": "sass",
       "Version": "0.4.10",
@@ -2343,23 +2452,39 @@
     },
     "tidyfinance": {
       "Package": "tidyfinance",
-      "Version": "0.4.5",
-      "Source": "Repository",
-      "Repository": "RSPM",
+      "Version": "0.4.5.9018",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteRepo": "r-tidyfinance",
+      "RemoteUsername": "tidy-finance",
+      "RemotePkgRef": "tidy-finance/r-tidyfinance",
+      "RemoteRef": "HEAD",
+      "RemoteSha": "3574bf8e4afce6c53cc1bef106bc47dd317baec7",
       "Requirements": [
+        "DBI",
         "R",
+        "RPostgres",
+        "arrow",
         "cli",
+        "dbplyr",
         "dplyr",
+        "frenchdata",
+        "glue",
+        "httr2",
+        "jsonlite",
         "lifecycle",
         "lubridate",
         "purrr",
         "rlang",
+        "sandwich",
         "slider",
         "stats",
+        "stringr",
         "tibble",
         "tidyr"
       ],
-      "Hash": "021c837d4b53439c08199809ca8e0562"
+      "Hash": "b64ae866bfc16c083573e7de9acfe445"
     },
     "tidymodels": {
       "Package": "tidymodels",

@@ -176,15 +176,15 @@ $selection-bg: #26351c !default;
   }
 }
 
-// Move "hamburger" menu button to top right
+// Move "hamburger" menu button to bottom left
 
 .reveal .slide-menu-button {
   position: fixed;
-  top: 6px;
-  right: 0;
+  bottom: 8px;
+  left: 8px;
+  top: auto;
+  right: auto;
   display: flex;
-  justify-content: flex-end;
-  align-items: flex-start;
   pointer-events: none;
 }
 
