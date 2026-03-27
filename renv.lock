@@ -396,24 +396,6 @@
       ],
       "Hash": "70a6489cc254171fb9b4a7f130f44dca"
     },
-    "butcher": {
-      "Package": "butcher",
-      "Version": "0.4.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "cli",
-        "lobstr",
-        "methods",
-        "purrr",
-        "rlang",
-        "tibble",
-        "utils",
-        "vctrs"
-      ],
-      "Hash": "c1a736286d618c0eb1cb0009ff7e4111"
-    },
     "cachem": {
       "Package": "cachem",
       "Version": "1.1.0",
@@ -1501,21 +1483,6 @@
         "zoo"
       ],
       "Hash": "c6fafa6cccb1e1dfe7f7d122efd6e6a7"
-    },
-    "lobstr": {
-      "Package": "lobstr",
-      "Version": "1.2.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "cpp11",
-        "crayon",
-        "methods",
-        "prettyunits",
-        "rlang"
-      ],
-      "Hash": "fff0d4c19e343d9bf6ecc44381f6f1f8"
     },
     "lubridate": {
       "Package": "lubridate",
