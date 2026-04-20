@@ -601,24 +601,6 @@
       ],
       "Hash": "2c14b873da71cacec1284f3f6d112ddc"
     },
-    "colourpicker": {
-      "Package": "colourpicker",
-      "Version": "1.3.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "ggplot2",
-        "htmltools",
-        "htmlwidgets",
-        "jsonlite",
-        "miniUI",
-        "shiny",
-        "shinyjs",
-        "utils"
-      ],
-      "Hash": "daec8f7d4ba89df06fe2c0802c3a9dac"
-    },
     "commonmark": {
       "Package": "commonmark",
       "Version": "2.0.0",
@@ -1101,27 +1083,6 @@
       ],
       "Hash": "4b29bf698d0c7bdb9f1e4976e7ade41d"
     },
-    "ggExtra": {
-      "Package": "ggExtra",
-      "Version": "0.11.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "R6",
-        "colourpicker",
-        "ggplot2",
-        "grDevices",
-        "grid",
-        "gtable",
-        "miniUI",
-        "scales",
-        "shiny",
-        "shinyjs",
-        "utils"
-      ],
-      "Hash": "80993d457103f6f991a4136dd16919eb"
-    },
     "ggplot2": {
       "Package": "ggplot2",
       "Version": "4.0.1",
@@ -1399,21 +1360,6 @@
         "yaml"
       ],
       "Hash": "04291cc45198225444a397606810ac37"
-    },
-    "httpuv": {
-      "Package": "httpuv",
-      "Version": "1.6.17",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "R6",
-        "Rcpp",
-        "later",
-        "promises",
-        "utils"
-      ],
-      "Hash": "4ff0297ad1cd631d57f0d30172972754"
     },
     "httr": {
       "Package": "httr",
@@ -1778,18 +1724,6 @@
         "tools"
       ],
       "Hash": "0ec19f34c72fab674d8f2b4b1c6410e1"
-    },
-    "miniUI": {
-      "Package": "miniUI",
-      "Version": "0.1.2",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "htmltools",
-        "shiny",
-        "utils"
-      ],
-      "Hash": "96b7fedb0964cc6b86631fb2fee23afa"
     },
     "modeldata": {
       "Package": "modeldata",
@@ -2564,53 +2498,6 @@
       ],
       "Hash": "5c47e84dc0a3ca761ae1d307889e796d"
     },
-    "shiny": {
-      "Package": "shiny",
-      "Version": "1.13.0",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "R6",
-        "bslib",
-        "cachem",
-        "cli",
-        "commonmark",
-        "fastmap",
-        "fontawesome",
-        "glue",
-        "grDevices",
-        "htmltools",
-        "httpuv",
-        "jsonlite",
-        "later",
-        "lifecycle",
-        "methods",
-        "mime",
-        "otel",
-        "promises",
-        "rlang",
-        "sourcetools",
-        "tools",
-        "utils",
-        "withr",
-        "xtable"
-      ],
-      "Hash": "3ae8521a5a4576fc4b78d00d401f22f9"
-    },
-    "shinyjs": {
-      "Package": "shinyjs",
-      "Version": "2.1.1",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "digest",
-        "jsonlite",
-        "shiny"
-      ],
-      "Hash": "96b8d41d0dfeef0117b4b7bc43fefabe"
-    },
     "slider": {
       "Package": "slider",
       "Version": "0.3.3",
@@ -2624,16 +2511,6 @@
         "warp"
       ],
       "Hash": "32a5a8d39faf43f51f302a9cd20b0189"
-    },
-    "sourcetools": {
-      "Package": "sourcetools",
-      "Version": "0.1.7-2",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R"
-      ],
-      "Hash": "e716e13bfbfe8acb6182a05f4b367772"
     },
     "sparsevctrs": {
       "Package": "sparsevctrs",
@@ -3332,19 +3209,6 @@
         "rlang"
       ],
       "Hash": "df249a568f7fbfa996016695d1da7ea1"
-    },
-    "xtable": {
-      "Package": "xtable",
-      "Version": "1.8-8",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "methods",
-        "stats",
-        "utils"
-      ],
-      "Hash": "93b19c064862d315a828c7170d806453"
     },
     "xts": {
       "Package": "xts",
