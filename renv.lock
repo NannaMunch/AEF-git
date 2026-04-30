@@ -621,6 +621,17 @@
       ],
       "Hash": "bb097fccb22d156624fd07cd2894ddb6"
     },
+    "coro": {
+      "Package": "coro",
+      "Version": "1.1.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "rlang"
+      ],
+      "Hash": "4998c8836ff95c90993a4eb8d853df71"
+    },
     "cpp11": {
       "Package": "cpp11",
       "Version": "0.5.2",
@@ -795,6 +806,29 @@
         "vctrs"
       ],
       "Hash": "50bbedd3d5b6a4ddc3c3c1602456aa35"
+    },
+    "ellmer": {
+      "Package": "ellmer",
+      "Version": "0.4.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "R",
+        "R6",
+        "S7",
+        "cli",
+        "coro",
+        "glue",
+        "httr2",
+        "jsonlite",
+        "later",
+        "lifecycle",
+        "promises",
+        "rlang",
+        "tibble",
+        "vctrs"
+      ],
+      "Hash": "c251e14722bdfbe83b1b5c442d835064"
     },
     "evaluate": {
       "Package": "evaluate",
@@ -1940,6 +1974,17 @@
       ],
       "Hash": "97fc0338dd42af55d170478dfc4c0c03"
     },
+    "pdftools": {
+      "Package": "pdftools",
+      "Version": "3.8.0",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "Rcpp",
+        "qpdf"
+      ],
+      "Hash": "fccbed79463720a7d724561273508330"
+    },
     "pillar": {
       "Package": "pillar",
       "Version": "1.11.1",
@@ -2110,6 +2155,18 @@
         "vctrs"
       ],
       "Hash": "0154ac5b9ef4df1a7be3a54602e781cf"
+    },
+    "qpdf": {
+      "Package": "qpdf",
+      "Version": "1.4.1",
+      "Source": "Repository",
+      "Repository": "RSPM",
+      "Requirements": [
+        "Rcpp",
+        "askpass",
+        "curl"
+      ],
+      "Hash": "34911880d3b48d7deae5f1f3ade92236"
     },
     "quadprog": {
       "Package": "quadprog",
