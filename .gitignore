@@ -13,3 +13,5 @@ mandatory-assignments/MA_1_portfolio_choice_2026.qmd
 data-r/stock_characteristics_monthly.parquet
 data-r/stock_characteristics_monthly.parquet
 .Renviron
+data-r/realized_covariance_stocks.csv
+data-r/realized_variance_stocks.csv

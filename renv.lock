@@ -2708,7 +2708,7 @@
     },
     "tidyfinance": {
       "Package": "tidyfinance",
-      "Version": "0.4.5.9018",
+      "Version": "0.4.5.9027",
       "Source": "GitHub",
       "RemoteType": "github",
       "RemoteHost": "api.github.com",
@@ -2716,7 +2716,7 @@
       "RemoteUsername": "tidy-finance",
       "RemotePkgRef": "tidy-finance/r-tidyfinance",
       "RemoteRef": "HEAD",
-      "RemoteSha": "3574bf8e4afce6c53cc1bef106bc47dd317baec7",
+      "RemoteSha": "79c26260f6eab9eba6dd03feda7dca8e794d0a93",
       "Requirements": [
         "DBI",
         "R",
@@ -2740,7 +2740,7 @@
         "tibble",
         "tidyr"
       ],
-      "Hash": "b64ae866bfc16c083573e7de9acfe445"
+      "Hash": "92c4bcf1ac3bfafa547185328513e5b5"
     },
     "tidymodels": {
       "Package": "tidymodels",

@@ -2,9 +2,11 @@
 subtitle: High-frequency econometrics
 filters:
   - timeline
+execute: 
+  cache: true
 ---
 
-## High-frequency trading (?)
+## High-frequency trading
 
 ![](./figures/tuchmann_broker.jpg){width=80% fig-align="center"}
 
@@ -152,7 +154,7 @@ ggplot(order_book, aes(x = price, y = depth, fill = side)) +
   theme(legend.position = "none", panel.grid.minor = element_blank())
 ```
 
-##  A typical NASDAQ trading day
+## A typical NASDAQ trading day
 
 ::: timeline
 ::: {.event data-label="09:30 AM"}
@@ -160,7 +162,7 @@ ggplot(order_book, aes(x = price, y = depth, fill = side)) +
 :::
 ::: {.event data-label="After 09:30 AM"}
 **Continuous trading**
-Cancellations/Submissions/Executions/ Hidden or Lit orders
+Cancellations, submissions, executions; hidden or lit orders
 :::
 
 ::: {.event data-label="4:00 PM"}
@@ -173,7 +175,7 @@ Cancellations/Submissions/Executions/ Hidden or Lit orders
 
 ## How to get high-frequency trading data at KU
 
-- As a member of KU, you can retrieve data from [Lobster](www.lobsterdata.com)
+- As a member of KU, you can retrieve data from [Lobster](https://www.lobsterdata.com)
 - Lobster is a limit order book data provider with easy-to-use, high-quality limit order book data for the entire universe of *NASDAQ* traded stocks
 - Lobster files contain all messages for a pre-specified ticker that went through NASDAQ servers
 
@@ -216,7 +218,7 @@ The process $(W_t)_{0\leq t\leq T}$ is a Brownian motion provided that
   
 ## Brownian motion: discrete sampling
 - Suppose $t = 0$ is the start of the trading day and $t=1$ is the end of the day
-- Assume there are $n$ equidistant observations (transactions) of the log  price
+- Assume there are $n$ equidistant observations (transactions) of the log price
 - One observation every $\Delta_{t_n} = 1/n$ units of time
 - We observe $X_{t_{n,i}}$ with $t_{n,i} = i\Delta t_n$ and get 
 $$\Delta X_{t_{n,i}} = X_{t_{n,i}} - X_{t_{n,i -1}} $$
@@ -225,6 +227,7 @@ $$\Delta X_{t_{n,i}} = X_{t_{n,i}} - X_{t_{n,i -1}} $$
 ## Simulation of a Brownian motion
 
 ```{r}
+#| label: brownian-motion-code-example
 #| eval: false
 price = cumsum(c(
   start,
@@ -232,6 +235,7 @@ price = cumsum(c(
 ))
 ```
 ```{r}
+#| label: fig-brownian-motion-simulation
 #| echo: false
 library(lubridate)
 library(purrr)
@@ -273,7 +277,7 @@ p_main <- simulation |>
   geom_line(alpha = 0.3) +
   geom_point(data = final_day, size = 0.1) +
   coord_cartesian(ylim = y_range) +
-  labs(x = "Day", y = "cum. return")
+  labs(x = "Intraday step", y = "cum. return")
 
 p_marg <- final_day |>
   ggplot(aes(x = price - 1)) +
@@ -289,15 +293,15 @@ p_main + p_marg + plot_layout(widths = c(5, 1))
 - The natural estimator for $\hat\mu$ is $$\hat\mu_n = \frac{1}{n\Delta t_n}\sum\limits_{i = 0}^{n-1}\Delta X_{t_n, i+1} = (X_1 - X_0)$$
 - (Maybe) surprising: $\hat\mu_n$ does not depend on the sampling frequency. Consistent estimation requires $t\rightarrow \infty$
 - (Maybe) more surprising: $\hat\sigma^2$ *can* be estimated consistently as $n\rightarrow \infty$!
-- Set $U_{n,i} = \Delta X_{t_n,i}/(\sigma\Delta t_n^{1/2}) \sim N\left(\frac{\mu}{\sigma}\Delta t_n^{1/2}, 1\right)$ and define the sample mean $\bar U_n = \frac{1}{n}\sum\limits_{i = 0}^{n-1} U_{n,i}$
-- Then $$\begin{aligned}\hat\sigma_n^2 &= \frac{1}{(n-1)\Delta t_n}\sum\limits_{i = 0}^{n-1}\left(\Delta X_{t_n, i+1} - \bar{\Delta X_{t_n}}\right)^2 \\&= \frac{\sigma^2\Delta t_n}{(n-1)\Delta t_n}\sum\limits_{i = 0}^{n-1}\left(\Delta U_{n, i} - \bar{U_{n}}\right)^2 \stackrel{\mathcal{L}}{=} \sigma^2\frac{\chi^2_{n-1}}{n-1}\end{aligned}$$
+- Set $U_{n,i+1} = \Delta X_{t_n,i+1}/(\sigma\Delta t_n^{1/2}) \sim N\left(\frac{\mu}{\sigma}\Delta t_n^{1/2}, 1\right)$ and define the sample mean $\bar U_n = \frac{1}{n}\sum\limits_{i = 0}^{n-1} U_{n,i+1}$
+- Then $$\begin{aligned}\hat\sigma_n^2 &= \frac{1}{(n-1)\Delta t_n}\sum\limits_{i = 0}^{n-1}\left(\Delta X_{t_n, i+1} - \bar{\Delta X_{t_n}}\right)^2 \\&= \frac{\sigma^2\Delta t_n}{(n-1)\Delta t_n}\sum\limits_{i = 0}^{n-1}\left(U_{n, i+1} - \bar U_n\right)^2 \stackrel{\mathcal{L}}{=} \sigma^2\frac{\chi^2_{n-1}}{n-1}\end{aligned}$$
 - It follows that $E\left(\hat\sigma_n^2\right) = \sigma^2$ and $\text{Var}\left(\hat\sigma_n^2\right) = \frac{2\sigma^4}{n-1}$
 
 ## Non-centered estimator
 
 - For high-frequency data, the mean $\bar{\Delta X_{t_n}}$ is often **not** removed in estimation
-- Instead, consider $$\hat\sigma^2_{n,\text{nocenter}} = \frac{1}{n\Delta t_n}\sum\limits_{i=0}^{n-1}\left(\Delta X_{t_{n, i +1}}\right)^2 = \hat\sigma_n^2 + \Delta t_n\bar\mu_n^2 = \hat\sigma_n^2 + \frac{1}{n}\bar\mu_n^2 $$
-- Since $\bar\mu_n$ does not depend on $n$, it follows that $\hat\sigma^2_{n,\text{nocenter}}$ is also consistent
+- Instead, consider $$\hat\sigma^2_{n,\text{nocenter}} = \frac{1}{n\Delta t_n}\sum\limits_{i=0}^{n-1}\left(\Delta X_{t_{n, i +1}}\right)^2 = \frac{n-1}{n}\hat\sigma_n^2 + \Delta t_n\hat\mu_n^2 = \frac{n-1}{n}\hat\sigma_n^2 + \frac{1}{n}\hat\mu_n^2 $$
+- Since $\hat\mu_n$ does not depend on $n$, it follows that $\hat\sigma^2_{n,\text{nocenter}}$ is also consistent
 
 ## Realized variance
 
@@ -306,17 +310,18 @@ p_main + p_marg + plot_layout(widths = c(5, 1))
 $$r(t,k) = X_t - X_{t-k} = \int\limits_{t-k}^t \mu_s ds + \int\limits_{t-k}^t \sigma_s dW_s$$
 - The diffusive sample path variation is called the integrated variance
 $$IV(t-k, k) = \int\limits_{t-k}^t \sigma_s^2 ds $$
-- As long as there are no jumps, $IV(0, 1) = RV^{(n)} := \sum\limits_{i=0}^{n-1}r_{i,n}^2$
-- $RV^{(n)}$ is the **realized variance**
+- Define the **realized variance** as $RV^{(n)} := \sum\limits_{i=0}^{n-1}r_{i,n}^2$
+- As long as there are no jumps, $RV^{(n)} \rightarrow IV(0, 1)$ as $n\rightarrow\infty$
 - 'Infill' asymptotics: sampling at the highest possible frequency is crucial!
 
 ## Infill asymptotics
 
 ![](./figures/infill_asymptotics.jpg)
 
-## Realized volatility of the S&P 500
+## Realized variance of the S&P 500
 
 ```{r}
+#| label: fig-sp500-realized-variance
 read_csv("../data-r/rv-data.csv", show_col_types = FALSE) |>
   ggplot(aes(x = Date, y = `Realized Variance (1-min)`)) +
   geom_line() +
@@ -329,7 +334,7 @@ read_csv("../data-r/rv-data.csv", show_col_types = FALSE) |>
 ## Market Microstructure Noise
 
 - Problem in practice: market microstructure frictions
-- E.g., Bid-ask spreads, price discreteness, asymmetric information, strategic order placement
+- E.g., bid-ask spreads, price discreteness, asymmetric information, strategic order placement
 - We can only observe
 $$Y_{i\Delta n} = X_{i\Delta n} + U _{i\Delta n}$$
 where $Y_{i\Delta n}$ is the observed (log) transaction price or quote, $X_{i\Delta n}$ is the *efficient* latent (log) price
@@ -354,16 +359,246 @@ $$\begin{aligned}Y_{\tau_i} &= \tilde X_{\tau_i} - \tilde X_{\tau_{i-1}} \\&= \l
 - We get $\text{Var}\left(Y_{\tau_i}\right) = \sigma^2\Delta_n + 2a^2$ and $\text{Cov}\left(Y_{\tau_i}, Y_{\tau_{i-1}}\right) = -a^2$
 - The proportion of the total return variance that is market microstructure-induced is $$\pi = \frac{2a^2}{2a^2 + \sigma^2\Delta_n}$$
 - As $\Delta_n$ gets small, a larger fraction of the observed return variance is noise-driven
-- Noise bias adjustment possible (Aït-Sahalia et al., 2005)
+- Noise bias adjustment possible (Ait-Sahalia et al., 2005)
+
+## Bid-ask bounce and the volatility signature plot
+
+```{r}
+#| label: fig-bid-ask-bounce-signature
+#| message: false
+#| warning: false
+#| echo: false
+#| fig-align: center
+#| fig-cap: "A simulated bid-ask bounce example. The left panel shows the volatility signature plot: realized variance is inflated at very high sampling frequencies because observed prices contain microstructure noise. The right panel shows that bid-ask bounce induces negative first-order autocovariance in observed returns."
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(purrr)
+
+set.seed(123)
+
+n_seconds <- 6.5 * 60 * 60
+sigma_daily <- 0.02
+half_spread <- 0.0004
+
+simulated_prices <- tibble(
+  second = 1:n_seconds,
+  efficient_price = cumsum(rnorm(
+    n_seconds,
+    sd = sigma_daily / sqrt(n_seconds)
+  )),
+  bounce = half_spread * sample(c(-1, 1), n_seconds, replace = TRUE),
+  observed_price = efficient_price + bounce
+)
+
+sampling_grid_sim <- tibble(
+  sampling_seconds = c(1, 2, 5, 10, 30, 60, 300, 600, 1800),
+  sampling_label = c(
+    "1 sec",
+    "2 sec",
+    "5 sec",
+    "10 sec",
+    "30 sec",
+    "1 min",
+    "5 min",
+    "10 min",
+    "30 min"
+  )
+)
+
+compute_simulated_rv <- function(sampling_seconds) {
+  simulated_prices |>
+    slice(seq(1, n(), by = sampling_seconds)) |>
+    summarise(realized_variance = sum(diff(observed_price)^2)) |>
+    pull(realized_variance)
+}
+
+signature_data <- sampling_grid_sim |>
+  mutate(
+    realized_variance = map_dbl(sampling_seconds, compute_simulated_rv),
+    sampling_label = factor(sampling_label, levels = sampling_label)
+  )
+
+autocovariance_data <- simulated_prices |>
+  summarise(
+    efficient = cov(diff(efficient_price)[-1], lag(diff(efficient_price))[-1]),
+    observed = cov(diff(observed_price)[-1], lag(diff(observed_price))[-1])
+  ) |>
+  tidyr::pivot_longer(
+    cols = everything(),
+    names_to = "price",
+    values_to = "first_order_autocovariance"
+  )
+
+p_signature <- signature_data |>
+  ggplot(aes(x = sampling_label, y = realized_variance, group = 1)) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(x = "Sampling interval", y = "Realized variance") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p_autocovariance <- autocovariance_data |>
+  ggplot(aes(x = price, y = first_order_autocovariance, fill = price)) +
+  geom_col(show.legend = FALSE) +
+  geom_hline(yintercept = 0, linewidth = 0.3) +
+  labs(x = NULL, y = "First-order autocovariance") +
+  theme_bw()
+
+p_signature + p_autocovariance + plot_layout(widths = c(2, 1))
+```
+
+## Volatility signature plot: S&P 500
+
+```{r}
+#| label: fig-rv-sampling-frequency
+#| message: false
+#| warning: false
+#| echo: false
+#| cache: true
+#| fig-align: center
+#| fig-cap: "Volatility signature plot for S&P 500 high-frequency midquotes. Each point reports the average daily realized variance computed at a different calendar-time sampling interval; higher estimates at very fine intervals indicate the influence of market microstructure noise."
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(purrr)
+
+data <- tidyfinance::download_data(
+  domain = "tidyfinance",
+  dataset = "high_frequency_sp500",
+  start_date = "2008-09-01",
+  end_date = "2008-09-30"
+) |>
+  transmute(ts, log_price = log(midquote))
+
+sampling_grid <- tibble(
+  sampling_seconds = c(
+    5,
+    10,
+    15,
+    30,
+    60,
+    120,
+    300,
+    600,
+    1800,
+    3600
+  ),
+  sampling_label = c(
+    "5 sec",
+    "10 sec",
+    "15 sec",
+    "30 sec",
+    "1 min",
+    "2 min",
+    "5 min",
+    "10 min",
+    "30 min",
+    "1 hour"
+  )
+)
+
+compute_rv <- function(sampling_seconds) {
+  data |>
+    arrange(ts) |>
+    mutate(
+      trading_day = as.Date(ts),
+      sampling_time = as.POSIXct(
+        floor(as.numeric(ts) / sampling_seconds) * sampling_seconds,
+        origin = "1970-01-01",
+        tz = tz(ts[1])
+      )
+    ) |>
+    group_by(trading_day, sampling_time) |>
+    slice_tail(n = 1) |>
+    ungroup() |>
+    arrange(trading_day, sampling_time) |>
+    group_by(trading_day) |>
+    mutate(return = log_price - lag(log_price)) |>
+    summarise(
+      realized_variance = sum(return^2, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    summarise(realized_variance = mean(realized_variance, na.rm = TRUE)) |>
+    pull(realized_variance)
+}
+
+rv_by_frequency <- sampling_grid |>
+  mutate(realized_variance = map_dbl(sampling_seconds, compute_rv)) |>
+  mutate(sampling_label = factor(sampling_label, levels = sampling_label))
+
+rv_by_frequency |>
+  ggplot(aes(x = sampling_label, y = realized_variance, group = 1)) +
+  geom_line() +
+  geom_point(size = 2) +
+  labs(
+    x = "Sampling interval",
+    y = "Realized variance",
+    title = "Volatility signature plot"
+  ) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Optimal sampling frequency
+
+- Optimal sampling frequency depends on the signal-to-noise ratio $\pi$
+
+![](./figures/optimal-sampling-frequency.jpg)
+
+## Two-scale realized variance
+
+- Sparse sampling reduces noise bias but lowers efficiency: we throw away data
+- Zhang, Mykland, and Ait-Sahalia (2005) propose a two-scale realized variance estimator based on
+  1. sub-sampling
+  2. averaging
+  3. bias correction
+- Start from observed noisy prices $Y_0,\ldots,Y_n$
+- Split the data into $K$ sparse sub-samples:
+$$G^{(k)} = \left\{Y_k, Y_{k+K}, Y_{k+2K}, \ldots\right\}, \quad k=1,\ldots,K$$
+- Compute realized variance on each sparse grid and average:
+$$RV^{\text{avg}}_K = \frac{1}{K}\sum_{k=1}^K RV^{(k)}$$
+- Correct the remaining noise bias using the all-data realized variance:
+$$TSRV = RV^{\text{avg}}_K - \frac{\bar n_K}{n}RV^{\text{all}}$$
+
+where $\bar n_K$ is the average number of returns per sparse grid.
+
+## TSRV example with second-level data
+
+```{r}
+#| echo: false
+#| label: fig-tsrv-example
+rv_data <- read_csv(
+  "../data-r/realized_variance_stocks.csv",
+  show_col_types = FALSE
+)
+
+rv_data |>
+  filter(symbol == "GOOGL") |>
+  select(date, rv1, bv5_ss) |>
+  tidyr::pivot_longer(-date) |>
+  ggplot(aes(x = date, y = value, color = name)) +
+  geom_line() +
+  labs(x = "Date", y = "Variance estimate", color = "Estimator") +
+  theme_bw()
+```
 
 
 ## Realized Covariances
 
-- Similar in spirit — the efficient log-price process follows an $N$-dimensional Brownian semimartingale
+- Similar in spirit -- the efficient log-price process follows an $N$-dimensional Brownian semimartingale
 $$X_t = \int\limits_{0}^t a_u du + \int\limits_{0}^t \sigma_u dW_u$$ where $a$ is a predictable locally bounded drift process, $\sigma_u$ is a volatility matrix process, and $W$ is a vector of independent Brownian motions
 - If $X_t$ is discretely observed, a natural estimator for the quadratic covariation is
-$$RC_n = \sum\limits_{i=1}^n\left(X_{i/n} - X_{(i-1)/n}\right)'\left(X_{i/n} - X_{(i-1)/n}\right)$$
+$$RC_n = \sum\limits_{i=1}^n\left(X_{i/n} - X_{(i-1)/n}\right)\left(X_{i/n} - X_{(i-1)/n}\right)'$$
 - Similar concept for realized betas $$R\beta_i = \frac{RC_{ip,n}}{RC_{pp,n}}$$ where $p$ corresponds to the market portfolio
+
+## Challenges in covariation estimation
+
+- Positive definiteness: can we invert the covariance matrix?
+- Conditioning: are matrix inversions numerically stable?
+- Efficiency: are we throwing away too much data due to sparse sampling?
+- Market microstructure effects
+- Asynchronicity of observations in time: Epps (1979, JASA)
 
 ## Multivariate Realized Kernels
 
@@ -371,8 +606,8 @@ $$RC_n = \sum\limits_{i=1}^n\left(X_{i/n} - X_{(i-1)/n}\right)'\left(X_{i/n} - X
 
 ![](./figures/refresh_time_sampling.jpg)
 
-- Definition: Refresh time for $t\in[0,1]$. Define the first refresh time as $\tau_1 = \max\left(t_1^{(1)}, \ldots, t_1^{(N)}\right)$ and then iteratively
-$$\tau_{j+1} = \max\left(t_{N_{\tau_j^{(1)}+1}}^{(1)}, \ldots, t_{N_{\tau_j^{(N)}+1}}^{(N)}\right) $$
+- Definition: Refresh time for $t\in[0,1]$. Define the first refresh time as $\tau_1 = \max\left(t_1^{(1)}, \ldots, t_1^{(N)}\right)$. For each asset $i$, let $N_j^{(i)} = \min\left\{k: t_k^{(i)} > \tau_j\right\}$ be the next observation after $\tau_j$; then define iteratively
+$$\tau_{j+1} = \max\left(t_{N_j^{(1)}}^{(1)}, \ldots, t_{N_j^{(N)}}^{(N)}\right) $$
 - Compute synchronized returns based on $\left\{\tau\right\}$
 
 ## High-frequency-based covariance matrix estimation
@@ -380,7 +615,7 @@ $$\tau_{j+1} = \max\left(t_{N_{\tau_j^{(1)}+1}}^{(1)}, \ldots, t_{N_{\tau_j^{(N)
 - Overcome asynchronicity by refresh time sampling:
 $$\begin{aligned}r\tau  _{t,1}:=\max_{i}\left\{\tau_{t,1} ^{(i)}\right\}, \quad r\tau  _{t,l+1}:=\max_{i}\left\{\tau_{t,N^{(i)}(r\tau  _{t,l})} ^{(i)}\right\}\end{aligned}$$
 
-- Realized kernel (Barndorff-Nielsen et al, 2011) :
+- Realized kernel (Barndorff-Nielsen et al., 2011):
 $$\begin{aligned}
 K_t := \sum\limits_{h=-H_t } ^{H_t } k\left(\frac{h}{H_t  +1 }\right) \Gamma_t ^{h},
 \end{aligned}$$

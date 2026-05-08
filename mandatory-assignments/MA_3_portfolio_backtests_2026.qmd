@@ -45,6 +45,8 @@ This assignment connects directly to Mandatory Assignment 2: use the predicted e
 
 Exercises build on each other. The covariance estimators from Exercise 3 and the expected return estimates from Exercise 4 feed directly into the backtesting engine in Exercise 5. Choose and document your estimators clearly, as they determine all downstream results.
 
+0. Go to [evaluering.ku.dk](evaluering.ku.dk) and leave your feedback on the course. **Do not move on without filling out the form**
+
 1. *Goal: construct a clean investment universe.* Use the CRSP monthly dataset, starting from January 1980. Retain only stocks with prices above \$2 and a market capitalization above the 20th NYSE size percentile in each month. Report how many stocks $N$ your universe contains on average and briefly characterize the sample.
 
 2. *Goal: establish the theoretical foundation.* Consider the transaction-cost-adjusted certainty-equivalent maximization problem with risk aversion $\gamma$:
@@ -80,3 +82,5 @@ in which $\omega_{t^+} := {\omega_t \circ (1 + r_t)}/{\iota'(\omega_t \circ (1 +
     - Average monthly turnover (as in equation 46 of @Hautsch.2019)
 
     Discuss the results: which strategy performs best after transaction costs? Does the choice of covariance estimator matter? Would you consider this a "true" out-of-sample experiment, and why?
+
+6. Write a 2 - 3 sentence summary of your personal key takeaways from Cilie Feldagers guest lecture (does not count to the page limit).
