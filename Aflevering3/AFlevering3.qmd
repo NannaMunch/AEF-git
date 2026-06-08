@@ -1,0 +1,21 @@
+---
+title: Mandatory Assignment 1
+author: Astrid Haarup Møller, Esmeralda Larsson and Nanna Munch Kjøller
+date: 2026-03-06
+date-format: MMMM DD, YYYY
+execute: 
+  echo: false
+  warning: false
+format:
+  pdf: 
+    number-sections: true
+    colorlinks: true
+    geometry:
+      - top=20mm
+      - left=20mm
+      - bottom=20mm
+      - right=20mm
+    lang: en
+    fontsize: 12pt
+    highlight-style: github-light
+---
