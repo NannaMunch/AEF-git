@@ -8,7 +8,7 @@ execute:
   warning: false
 format:
   pdf: 
-    number-sections: true
+    number-sections: false
     colorlinks: true
     geometry:
       - top=20mm
@@ -136,9 +136,11 @@ summary_ex1 = pd.DataFrame({
 
 ## Exercise 2
 Next, we construct a universe of $N = 50$ synthetic assets following the single-factor model
+
 $$
 \tilde r_{i,t} = \beta_i \tilde r_{m,t} + \varepsilon_{i,t}.
 $$
+
 The factor loadings $\beta_i$ and idiosyncratic volatilities $\sigma_{\varepsilon,i}$ are drawn from the distributions specified in the assignment. Using the estimated market moments from Exercise 1, we construct the true mean vector $\mu$ and covariance matrix $\Sigma$, which are treated as the true parameters throughout the remainder of the assignment.
 
 ```{python}
@@ -148,14 +150,74 @@ The factor loadings $\beta_i$ and idiosyncratic volatilities $\sigma_{\varepsilo
 N = 50
 
 beta = np.random.uniform(0.5, 1.5, N)
-sigma_epsilon = np.random.uniform(0.10 / np.sqrt(12), 0.30 / np.sqrt(12), N)
+sigma_epsilon = np.random.uniform(
+    0.10 / np.sqrt(12),
+    0.30 / np.sqrt(12),
+    N
+)
 
 mu = beta * mu_m
 Sigma = sigma2_m * np.outer(beta, beta) + np.diag(sigma_epsilon**2)
 ```
 
+```{python}
+#| label: tbl-synthetic-assets
+#| tbl-cap: "Summary statistics for the synthetic asset universe."
+#| cache: true
+
+summary_ex2 = pd.DataFrame({
+    "Parameter": [
+        "Beta",
+        "Idiosyncratic volatility",
+        "Expected excess return"
+    ],
+    "Min": [
+        beta.min(),
+        sigma_epsilon.min(),
+        mu.min()
+    ],
+    "Mean": [
+        beta.mean(),
+        sigma_epsilon.mean(),
+        mu.mean()
+    ],
+    "Max": [
+        beta.max(),
+        sigma_epsilon.max(),
+        mu.max()
+    ]
+})
+
+(
+    GT(summary_ex2.round(4))
+    .cols_align(
+        align="left",
+        columns=["Parameter"]
+    )
+    .cols_align(
+        align="right",
+        columns=["Min", "Mean", "Max"]
+    )
+    .tab_source_note(
+        source_note=md(
+            "**Note:** Summary statistics for the $N = 50$ synthetic assets "
+            "constructed in Exercise 2 using the calibrated single-factor model. "
+            "All quantities are in monthly units."
+        )
+    )
+)
+```
+
+@tbl-synthetic-assets summarizes the characteristics of the $N = 50$ synthetic assets. The true covariance matrix is constructed as
+
+$$
+\Sigma = \sigma_m^2 \beta\beta' + \text{diag}(\sigma_\varepsilon^2),
+$$
+
+where the first term captures systematic market risk and the second term captures idiosyncratic risk.
+
 ## Exercise 3
-We next implement functions to compute the tangency portfolio and the mean-variance efficient frontier for a given mean vector $\mu$ and covariance matrix $\Sigma$. The tangency portfolio maximizes the Sharpe ratio, while the efficient frontier contains the portfolios with minimum variance for a given target return.
+Using the true mean vector $\mu$ and covariance matrix $\Sigma$ constructed in Exercise 2, we implement functions to compute the tangency portfolio and the mean–variance efficient frontier. The tangency portfolio maximizes the Sharpe ratio, while the efficient frontier consists of the minimum-variance portfolios for a range of target returns. These functions are used throughout the remainder of the assignment to evaluate portfolio allocations based on both true and estimated parameters.
 
 ```{python}
 #| label: ex3-frontier-functions
