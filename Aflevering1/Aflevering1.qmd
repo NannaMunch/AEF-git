@@ -1,6 +1,6 @@
 ---
 title: Mandatory Assignment 1
-author: Astrid Haarup Møller, Esmeralda Larsson and Nanna Munch Kjøller
+author: Fmr247, Rfp484 and Cdn358
 date: 2026-03-06
 date-format: MMMM DD, YYYY
 execute: 
@@ -30,6 +30,7 @@ import pandas as pd
 import numpy as np
 import tidyfinance as tf
 from plotnine import ggplot, aes, geom_line, geom_point, labs, theme_bw
+from great_tables import GT, md
 
 np.random.seed(2026)
 ```
@@ -100,11 +101,36 @@ summary_ex1 = pd.DataFrame({
     "value": [mu_m, sigma2_m, mu_m_annualized, sigma2_m_annualized]
 })
 ```
+
 ```{python}
 #| label: tbl-market-moments
-#| tbl-cap: Estimated monthly and annualized market moments
+#| tbl-cap: "Estimated monthly and annualised market parameters."
 #| cache: true
-summary_ex1.round(4)
+
+summary_ex1 = pd.DataFrame({
+    "Parameter": ["Mean excess return", "Variance"],
+    "Monthly": [mu_m, sigma2_m],
+    "Annualised": [mu_m_annualized, sigma2_m_annualized]
+})
+
+(
+    GT(summary_ex1.round(4))
+    .cols_align(
+        align="left",
+        columns=["Parameter"]
+    )
+    .cols_align(
+        align="right",
+        columns=["Monthly", "Annualised"]
+    )
+    .tab_source_note(
+        source_note=md(
+            "**Note:** Based on monthly S&P 500 excess returns (`^GSPC`) "
+            "from January 2000 to February 2026.<br>"
+            "The risk-free rate is `^IRX`, converted to a monthly rate."
+        )
+    )
+)
 ```
 
 @tbl-market-moments reports the estimated monthly mean excess market return and variance, together with their annualized counterparts. The estimated monthly mean excess return is approximately 0.45\%, while the annualized mean excess return is approximately 5.45\%. The corresponding annualized variance is approximately 0.0228.
