@@ -28,8 +28,8 @@ format:
 import pandas as pd
 import numpy as np
 import tidyfinance as tf
-from plotnine import ggplot, aes, geom_line, geom_point, labs, theme_bw
-from great_tables import GT, md
+from plotnine import ggplot, aes, geom_line, geom_point, labs, theme_bw, facet_wrap, theme, element_blank
+from great_tables import GT, md, html
 
 np.random.seed(2026)
 ```
@@ -103,7 +103,7 @@ summary_ex1 = pd.DataFrame({
 
 ```{python}
 #| label: tbl-market-moments
-#| tbl-cap: "Estimated monthly and annualised market parameters."
+#| tbl-cap: "Estimated monthly and annualized market parameters."
 #| cache: true
 
 summary_ex1 = pd.DataFrame({
@@ -158,6 +158,10 @@ sigma_epsilon = np.random.uniform(
 
 mu = beta * mu_m
 Sigma = sigma2_m * np.outer(beta, beta) + np.diag(sigma_epsilon**2)
+asset_points = pd.DataFrame({
+    "volatility": np.sqrt(np.diag(Sigma)),
+    "return": mu
+})
 ```
 
 ```{python}
@@ -199,10 +203,9 @@ summary_ex2 = pd.DataFrame({
         columns=["Min", "Mean", "Max"]
     )
     .tab_source_note(
-        source_note=md(
-            "**Note:** Summary statistics for the $N = 50$ synthetic assets "
-            "constructed in Exercise 2 using the calibrated single-factor model. "
-            "All quantities are in monthly units."
+        source_note=html(
+            "<b>Note:</b> Summary statistics for the N = 50 synthetic assets.<br>"
+            "All quantities are reported in monthly units."
         )
     )
 )
@@ -217,7 +220,33 @@ $$
 where the first term captures systematic market risk and the second term captures idiosyncratic risk.
 
 ## Exercise 3
-Using the true mean vector $\mu$ and covariance matrix $\Sigma$ constructed in Exercise 2, we implement functions to compute the tangency portfolio and the mean–variance efficient frontier. The tangency portfolio maximizes the Sharpe ratio, while the efficient frontier consists of the minimum-variance portfolios for a range of target returns. These functions are used throughout the remainder of the assignment to evaluate portfolio allocations based on both true and estimated parameters.
+
+Using the true mean vector $\mu$ and covariance matrix $\Sigma$ constructed in Exercise 2, we implement functions to compute the tangency portfolio and the mean–variance efficient frontier.
+
+The efficient frontier consists of portfolios that minimize portfolio variance for a given target return,
+$$
+\omega_{eff}(\bar{\mu})
+=
+\arg\min_{\omega}
+\omega' \Sigma \omega,
+$$
+subject to
+$$
+\omega' \iota = 1,
+\qquad
+\omega' \mu \ge \bar{\mu}.
+$$
+
+The tangency portfolio is computed as
+$$
+\omega_{tan}
+=
+\frac{\Sigma^{-1}\tilde{\mu}}
+{\iota' \Sigma^{-1}\tilde{\mu}},
+$$
+where $\tilde{\mu} = \mu-r_f$ denotes expected excess returns.
+
+The implemented functions return portfolio weights together with the corresponding expected return, variance, volatility and Sharpe ratio. They are used throughout the remainder of the assignment to evaluate portfolio allocations under both true and estimated parameters.
 
 ```{python}
 #| label: ex3-frontier-functions
@@ -287,32 +316,50 @@ tangency_true = compute_tangency_portfolio(mu, Sigma)
 ```{python}
 #| label: fig-true-efficient-frontier
 #| fig-cap: Mean-variance efficient frontier and tangency portfolio based on the true parameters.
+
 tangency_point = pd.DataFrame({
     "volatility": [tangency_true["volatility"]],
     "target_return": [tangency_true["mean"]]
 })
 
 (
-    ggplot(frontier_true, aes(x="volatility", y="target_return")) +
-    geom_line() +
+    ggplot() +
+
+    geom_point(
+        data=asset_points,
+        mapping=aes(x="volatility", y="return"),
+        alpha=0.45,
+        color="grey",
+        size=2
+    ) +
+
+    geom_line(
+        data=frontier_true,
+        mapping=aes(x="volatility", y="target_return"),
+        size=1.2
+    ) +
+
     geom_point(
         data=tangency_point,
         mapping=aes(x="volatility", y="target_return"),
-        size=2
+        color="red",
+        size=3.5
     ) +
+
     labs(
-        x="Portfolio volatility",
-        y="Expected excess return"
+        x="Monthly volatility",
+        y="Monthly expected excess return"
     ) +
+
     theme_bw()
 )
 ```
 
-Figure @fig-true-efficient-frontier shows the efficient frontier implied by the true parameter values. The marked point denotes the tangency portfolio, which achieves the highest Sharpe ratio among all feasible portfolios.
+@fig-true-efficient-frontier shows the risk-return characteristics of the 50 synthetic assets together with the mean-variance efficient frontier. The grey points represent individual assets, while the frontier shows the set of portfolios that achieve the highest expected excess return for a given level of risk. The marked point denotes the tangency portfolio, which maximizes the Sharpe ratio and therefore represents the most attractive risk-return trade-off under the true parameter values.
 
 
 ## Exercise 5
-To study estimation error, we simulate asset returns from the true data-generating process and estimate the mean vector $\hat{\mu}$ and covariance matrix $\hat{\Sigma}$ from the simulated sample. These sample estimates are then used to construct a plug-in efficient frontier.
+To study estimation error, we simulate asset returns from the true data-generating process and estimate the mean vector $\hat{\mu}$ and covariance matrix $\hat{\Sigma}$ from the simulated sample.
 
 ```{python}
 #| label: ex5-simulate-returns
@@ -327,114 +374,110 @@ def simulate_returns(periods, expected_returns, covariance_matrix):
     return returns
 ```
 
-We first compare the true efficient frontier with the frontier estimated from a single simulated sample with $T = 120$ monthly observations.
-
-```{python}
-#| label: ex5-one-simulation
-#| cache: true
-
-T = 120
-
-simulated_returns = simulate_returns(T, mu, Sigma)
-
-mu_hat = simulated_returns.mean(axis=0)
-Sigma_hat = np.cov(simulated_returns, rowvar=False, ddof=1)
-
-frontier_hat = compute_efficient_frontier(mu_hat, Sigma_hat, n_points=100)
-tangency_hat = compute_tangency_portfolio(mu_hat, Sigma_hat)
-```
-
-```{python}
-#| label: fig-estimation-error-frontier
-#| fig-pos: H
-#| fig-cap: True and estimated efficient frontiers based on one simulated sample.
-
-true_tangency_point = pd.DataFrame({
-    "volatility": [tangency_true["volatility"]],
-    "target_return": [tangency_true["mean"]],
-    "type": ["True tangency portfolio"]
-})
-
-estimated_tangency_point = pd.DataFrame({
-    "volatility": [tangency_hat["volatility"]],
-    "target_return": [tangency_hat["mean"]],
-    "type": ["Estimated tangency portfolio"]
-})
-
-frontier_true_plot = frontier_true.copy()
-frontier_true_plot["type"] = "True frontier"
-
-frontier_hat_plot = frontier_hat.copy()
-frontier_hat_plot["type"] = "Estimated frontier"
-
-frontiers_plot = pd.concat([frontier_true_plot, frontier_hat_plot], ignore_index=True)
-tangency_points = pd.concat([true_tangency_point, estimated_tangency_point], ignore_index=True)
-
-(
-    ggplot(frontiers_plot, aes(x="volatility", y="target_return", linetype="type")) +
-    geom_line() +
-    geom_point(
-        data=tangency_points,
-        mapping=aes(x="volatility", y="target_return", shape="type"),
-        size=2
-    ) +
-    labs(
-        x="Portfolio volatility",
-        y="Expected excess return",
-        linetype="",
-        shape=""
-    ) +
-    theme_bw()
-)
-```
-
-To study how sample size affects estimation error, we repeat the simulation for different values of $T$.
+Using this function, we repeatedly simulate returns (15 times) and construct plug-in efficient frontiers based on the estimated parameters $\hat{\mu}$ and $\hat{\Sigma}$. We consider sample sizes of $T=60$, $T=120$ and $T=500$ to examine how the magnitude of estimation error depends on the amount of available data.
 
 ```{python}
 #| label: ex5-frontiers-by-sample-size
 #| cache: true
 
-sample_sizes = [60, 120, 240]
+sample_sizes = [60, 120, 500]
+n_replications = 20
+
 frontier_list = []
 
 for T in sample_sizes:
-    simulated_returns = simulate_returns(T, mu, Sigma)
+    for rep in range(n_replications):
 
-    mu_hat = simulated_returns.mean(axis=0)
-    Sigma_hat = np.cov(simulated_returns, rowvar=False, ddof=1)
+        simulated_returns = simulate_returns(T, mu, Sigma)
 
-    frontier_hat = compute_efficient_frontier(mu_hat, Sigma_hat, n_points=100)
-    frontier_hat["sample"] = f"Estimated frontier (T = {T})"
+        mu_hat = simulated_returns.mean(axis=0)
+        Sigma_hat = np.cov(simulated_returns, rowvar=False, ddof=1)
 
-    frontier_list.append(frontier_hat)
+        frontier_hat = compute_efficient_frontier(
+            mu_hat,
+            Sigma_hat,
+            n_points=100
+        )
 
-frontier_true_plot = frontier_true.copy()
-frontier_true_plot["sample"] = "True frontier"
+        frontier_hat["T"] = f"T = {T}"
+        frontier_hat["replication"] = rep
 
-frontier_comparison = pd.concat([frontier_true_plot] + frontier_list, ignore_index=True)
-```
+        frontier_list.append(frontier_hat)
 
-```{python}
-#| label: fig-frontier-sample-size
-#| fig-pos: H
-#| fig-cap: Estimated efficient frontiers for different sample sizes together with the true frontier.
+frontier_replications = pd.concat(frontier_list, ignore_index=True)
 
-(
-    ggplot(frontier_comparison, aes(x="volatility", y="target_return", linetype="sample")) +
-    geom_line() +
-    labs(
-        x="Portfolio volatility",
-        y="Expected excess return",
-        linetype=""
-    ) +
-    theme_bw()
+frontier_true_plot = pd.concat(
+    [
+        frontier_true.assign(T="T = 60"),
+        frontier_true.assign(T="T = 120"),
+        frontier_true.assign(T="T = 500")
+    ],
+    ignore_index=True
+)
+
+frontier_replications["T"] = pd.Categorical(
+    frontier_replications["T"],
+    categories=["T = 60", "T = 120", "T = 500"],
+    ordered=True
+)
+
+frontier_true_plot["T"] = pd.Categorical(
+    frontier_true_plot["T"],
+    categories=["T = 60", "T = 120", "T = 500"],
+    ordered=True
 )
 ```
 
-@fig-estimation-error-frontier and @fig-frontier-sample-size illustrate how estimation error affects the shape of the efficient frontier. When the sample size is small relative to the number of assets, the estimated frontier can deviate substantially from the true frontier. As $T$ increases, the estimated frontier becomes more stable and approaches the true frontier.
+```{python}
+#| label: fig-estimation-error
+#| fig-pos: H
+#| fig-cap: Estimated efficient frontiers from repeated simulations compared with the true frontier.
+
+(
+    ggplot() +
+
+    geom_line(
+        data=frontier_replications,
+        mapping=aes(
+            x="volatility",
+            y="target_return",
+            group="replication"
+        ),
+        color="gray",
+        alpha=0.5,
+        size=0.4
+    ) +
+
+    geom_line(
+        data=frontier_true_plot,
+        mapping=aes(
+            x="volatility",
+            y="target_return"
+        ),
+        color="blue",
+        size=1.2
+    ) +
+
+    facet_wrap("~T", nrow=1) +
+
+    labs(
+        x="Monthly volatility",
+        y="Monthly expected excess return"
+    ) +
+
+    theme_bw() +
+
+    theme(
+        legend_position="none",
+        strip_background=element_blank(),
+        panel_border=element_blank(),
+        figure_size=(10, 3.5)
+    )
+)
+```
+@fig-estimation-error compares the true efficient frontier with frontiers estimated from simulated samples of different lengths. For $T=60$, the estimated frontiers display substantial variation across simulations and often differ markedly from the true frontier. As the sample size increases to $T=120$ and $T=500$, the estimated frontiers become increasingly clustered around the true frontier. This indicates that larger samples produce more reliable estimates of the mean vector and covariance matrix, leading to more accurate estimates of the efficient frontier. Overall, the figure shows that estimation error becomes less severe as the amount of available data increases.
 
 ## Exercise 6
-
 To evaluate the impact of estimation error, we compare the true tangency portfolio with the plug-in tangency portfolio. The true tangency portfolio is constructed using the true parameters $\mu$ and $\Sigma$, while the plug-in tangency portfolio is based on the estimated sample moments $\hat{\mu}$ and $\hat{\Sigma}$.
 
 The tangency portfolio weights are given by
