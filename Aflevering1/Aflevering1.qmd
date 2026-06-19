@@ -27,9 +27,12 @@ format:
 
 import pandas as pd
 import numpy as np
+from plotnine import geom_histogram
+from plotnine import geom_errorbar
 import tidyfinance as tf
-from plotnine import ggplot, aes, geom_line, geom_point, labs, theme_bw, facet_wrap, theme, element_blank
+from plotnine import ggplot, aes, geom_line, geom_point, labs, theme_bw, facet_wrap, theme, element_blank, scale_x_continuous, scale_y_continuous, element_rect, geom_hline, geom_histogram, geom_vline
 from great_tables import GT, md, html
+from mizani.formatters import percent_format
 
 np.random.seed(2026)
 ```
@@ -374,14 +377,14 @@ def simulate_returns(periods, expected_returns, covariance_matrix):
     return returns
 ```
 
-Using this function, we repeatedly simulate returns (15 times) and construct plug-in efficient frontiers based on the estimated parameters $\hat{\mu}$ and $\hat{\Sigma}$. We consider sample sizes of $T=60$, $T=120$ and $T=500$ to examine how the magnitude of estimation error depends on the amount of available data.
+Using this function, we repeatedly simulate returns (30 times) and construct plug-in efficient frontiers based on the estimated parameters $\hat{\mu}$ and $\hat{\Sigma}$. We consider sample sizes of $T=60$, $T=120$ and $T=500$ to examine how the magnitude of estimation error depends on the amount of available data.
 
 ```{python}
 #| label: ex5-frontiers-by-sample-size
 #| cache: true
 
 sample_sizes = [60, 120, 500]
-n_replications = 20
+n_replications = 30
 
 frontier_list = []
 
@@ -443,9 +446,9 @@ frontier_true_plot["T"] = pd.Categorical(
             y="target_return",
             group="replication"
         ),
-        color="gray",
-        alpha=0.5,
-        size=0.4
+        color="red",
+        alpha=0.18,
+        size=0.35
     ) +
 
     geom_line(
@@ -454,15 +457,15 @@ frontier_true_plot["T"] = pd.Categorical(
             x="volatility",
             y="target_return"
         ),
-        color="blue",
-        size=1.2
+        color="black",
+        size=1.1
     ) +
 
     facet_wrap("~T", nrow=1) +
 
     labs(
-        x="Monthly volatility",
-        y="Monthly expected excess return"
+        x="Volatility (monthly)",
+        y="Expected excess return (monthly)"
     ) +
 
     theme_bw() +
@@ -470,38 +473,21 @@ frontier_true_plot["T"] = pd.Categorical(
     theme(
         legend_position="none",
         strip_background=element_blank(),
-        panel_border=element_blank(),
+        panel_border=element_rect(color="black", fill=None),
         figure_size=(10, 3.5)
     )
 )
 ```
-@fig-estimation-error compares the true efficient frontier with frontiers estimated from simulated samples of different lengths. For $T=60$, the estimated frontiers display substantial variation across simulations and often differ markedly from the true frontier. As the sample size increases to $T=120$ and $T=500$, the estimated frontiers become increasingly clustered around the true frontier. This indicates that larger samples produce more reliable estimates of the mean vector and covariance matrix, leading to more accurate estimates of the efficient frontier. Overall, the figure shows that estimation error becomes less severe as the amount of available data increases.
+@fig-estimation-error compares the true efficient frontier (black) with frontiers estimated from simulated samples (red) of different lengths. For T=60, the estimated frontiers display substantial variation across simulations and often differ markedly from the true frontier. As the sample size increases to T=120 and T=500, the estimated frontiers become increasingly clustered around the true frontier. This indicates that larger samples produce more reliable estimates of the mean vector and covariance matrix, leading to more accurate estimates of the efficient frontier. Overall, the figure shows that estimation error becomes less severe as the amount of available data increases.
 
 ## Exercise 6
-To evaluate the impact of estimation error, we compare the true tangency portfolio with the plug-in tangency portfolio. The true tangency portfolio is constructed using the true parameters $\mu$ and $\Sigma$, while the plug-in tangency portfolio is based on the estimated sample moments $\hat{\mu}$ and $\hat{\Sigma}$.
+To evaluate the impact of estimation error on portfolio performance, we compare the true tangency portfolio with the plug-in tangency portfolio. The plug-in portfolio is constructed from the estimated moments $\hat{\mu}$ and $\hat{\Sigma}$, but its Sharpe ratio is evaluated using the true parameters $\mu$ and $\Sigma$.
 
-The tangency portfolio weights are given by
-
-$$
-w_{tan} = \frac{\Sigma^{-1}\mu}{\iota^{\top}\Sigma^{-1}\mu},
-$$
-
-where $\iota$ denotes a vector of ones.
-
-The Sharpe ratio of a portfolio with weights $w$ is defined as
+The out-of-sample Sharpe ratio is computed as
 
 $$
-SR = \frac{w^{\top}\mu}{\sqrt{w^{\top}\Sigma w}}.
+SR(w)=\frac{w^\top \mu}{\sqrt{w^\top \Sigma w}}.
 $$
-
-To analyze the effect of estimation error, asset returns are simulated from the multivariate normal distribution
-
-$$
-r_t \sim \mathcal{N}(\mu,\Sigma).
-$$
-
-For each simulated sample with size $T$, the sample estimates $\hat{\mu}$ and $\hat{\Sigma}$ are computed and used to construct the plug-in tangency portfolio. The resulting portfolio is then evaluated using the true parameters $\mu$ and $\Sigma$.
-
 
 ```{python}
 #| label: ex6-helper-functions
@@ -522,11 +508,17 @@ def evaluate_portfolio(weights, mu_true, Sigma_true):
 ```
 
 ```{python}
-#| label: ex6-plugin-performance
+#| label: ex6-plugin-simulations
 #| cache: true
 
-def simulate_plugin_tangency_performance(T, mu_true, Sigma_true, n_simulations=200):
+def simulate_plugin_tangency_performance(T, mu_true, Sigma_true, n_simulations=500):
     true_tangency = compute_tangency_portfolio(mu_true, Sigma_true)
+
+    true_performance = evaluate_portfolio(
+        true_tangency["weights"],
+        mu_true,
+        Sigma_true
+    )
 
     results = []
 
@@ -538,11 +530,16 @@ def simulate_plugin_tangency_performance(T, mu_true, Sigma_true, n_simulations=2
 
         plugin_tangency = compute_tangency_portfolio(mu_hat, Sigma_hat)
 
-        true_performance = evaluate_portfolio(true_tangency["weights"], mu_true, Sigma_true)
-        plugin_performance = evaluate_portfolio(plugin_tangency["weights"], mu_true, Sigma_true)
+        plugin_performance = evaluate_portfolio(
+            plugin_tangency["weights"],
+            mu_true,
+            Sigma_true
+        )
 
         results.append({
-            "T": T,
+            "T": f"T = {T}",
+            "sample_size": T,
+            "simulation": simulation,
             "true_sharpe": true_performance["sharpe"],
             "plugin_sharpe": plugin_performance["sharpe"]
         })
@@ -551,61 +548,126 @@ def simulate_plugin_tangency_performance(T, mu_true, Sigma_true, n_simulations=2
 ```
 
 ```{python}
-#| label: tbl-plugin-performance
-#| tbl-cap: Average Sharpe ratios of the true and plug-in tangency portfolios across sample sizes.
+#| label: ex6-results
 #| cache: true
 
-sample_sizes = [60, 120, 240, 480]
+sample_sizes_ex6 = [60, 120, 240, 500]
 
 results_ex6 = pd.concat(
-    [simulate_plugin_tangency_performance(T, mu, Sigma, n_simulations=200) for T in sample_sizes],
+    [
+        simulate_plugin_tangency_performance(
+            T,
+            mu,
+            Sigma,
+            n_simulations=500
+        )
+        for T in sample_sizes_ex6
+    ],
     ignore_index=True
 )
 
+results_ex6["T"] = pd.Categorical(
+    results_ex6["T"],
+    categories=["T = 60", "T = 120", "T = 240", "T = 500"],
+    ordered=True
+)
+
+true_sharpe_value = results_ex6["true_sharpe"].iloc[0]
+
 summary_ex6 = (
     results_ex6
-    .groupby("T", as_index=False)
+    .groupby("sample_size", as_index=False)
     .agg(
-        true_sharpe=("true_sharpe", "mean"),
-        plugin_sharpe=("plugin_sharpe", "mean")
+        mean_plugin_sharpe=("plugin_sharpe", "mean"),
+        std_plugin_sharpe=("plugin_sharpe", "std")
     )
 )
 
-summary_ex6
+summary_ex6["true_sharpe"] = true_sharpe_value
+summary_ex6["sharpe_loss"] = (
+    summary_ex6["true_sharpe"] - summary_ex6["mean_plugin_sharpe"]
+)
+```
+
+```{python}
+#| label: tbl-plugin-performance
+#| tbl-cap: "Out-of-sample Sharpe ratios of the plug-in tangency portfolio."
+#| cache: true
+
+(
+    GT(summary_ex6.round(4))
+    .cols_label(
+        sample_size="T",
+        mean_plugin_sharpe="Mean plug-in Sharpe",
+        std_plugin_sharpe="Std plug-in Sharpe",
+        true_sharpe="True Sharpe",
+        sharpe_loss="Sharpe loss"
+    )
+)
 ```
 
 ```{python}
 #| label: fig-plugin-performance
 #| fig-pos: H
-#| fig-cap: True and plug-in tangency portfolio performance evaluated under the true parameters.
+#| fig-cap: Distribution of out-of-sample Sharpe ratios for the plug-in tangency portfolio.
 
-plot_ex6 = pd.concat([
-    summary_ex6[["T", "true_sharpe"]].rename(columns={"true_sharpe": "sharpe"}).assign(type="True tangency portfolio"),
-    summary_ex6[["T", "plugin_sharpe"]].rename(columns={"plugin_sharpe": "sharpe"}).assign(type="Plug-in tangency portfolio")
-], ignore_index=True)
+true_line = (
+    results_ex6[["T", "true_sharpe"]]
+    .drop_duplicates()
+)
+
+mean_line = (
+    results_ex6
+    .groupby("T", as_index=False, observed=True)
+    .agg(mean_plugin_sharpe=("plugin_sharpe", "mean"))
+)
 
 (
-    ggplot(plot_ex6, aes(x="T", y="sharpe", linetype="type")) +
-    geom_line() +
-    geom_point() +
-    labs(
-        x="Sample size T",
-        y="Average true Sharpe ratio",
-        linetype=""
+    ggplot(results_ex6, aes(x="plugin_sharpe")) +
+
+    geom_histogram(
+        bins=50,
+        fill="lightblue",
+        color="white"
     ) +
-    theme_bw()
+
+    geom_vline(
+        data=true_line,
+        mapping=aes(xintercept="true_sharpe"),
+        color="blue",
+        linetype="dashed",
+        size=1
+    ) +
+
+    geom_vline(
+        data=mean_line,
+        mapping=aes(xintercept="mean_plugin_sharpe"),
+        color="red",
+        linetype="dashed",
+        size=1
+    ) +
+
+    facet_wrap("~T", nrow=2, scales="free_y") +
+
+    labs(
+        x="Out-of-sample Sharpe ratio",
+        y="Count"
+    ) +
+
+    theme_bw() +
+
+    theme(
+        legend_position="none",
+        strip_background=element_blank(),
+        panel_border=element_blank(),
+        figure_size=(8, 5)
+    )
 )
 ```
 
-@tbl-plugin-performance reports the average Sharpe ratios of the true tangency portfolio and the plug-in tangency portfolio for different sample sizes.
-
-The results show that the plug-in tangency portfolio performs substantially worse than the true tangency portfolio when $T$ is small. As $T$ increases, the plug-in Sharpe ratio improves because the estimates $\hat{\mu}$ and $\hat{\Sigma}$ become more accurate.
-
-@fig-plugin-performance illustrates the same pattern. The performance of the plug-in tangency portfolio increases with the sample size, but remains below the performance of the true tangency portfolio.
-
+@tbl-plugin-performance and @fig-plugin-performance show the out-of-sample performance of the plug-in tangency portfolio. The blue dashed line marks the Sharpe ratio of the true tangency portfolio, while the red dashed line marks the average plug-in Sharpe ratio for each sample size. The histograms show the distribution of plug-in Sharpe ratios across simulations. When \(T\) is small, the plug-in Sharpe ratios are dispersed and lie far below the true optimum. As \(T\) increases, the distribution shifts closer to the true Sharpe ratio, showing that performance improves when the sample moments are estimated more precisely.
 
 ## Exercise 7
-
 To study the robustness of different portfolio construction methods, we compare the plug-in tangency portfolio with several alternative strategies.
 
 The first benchmark is the equally weighted portfolio, defined as
