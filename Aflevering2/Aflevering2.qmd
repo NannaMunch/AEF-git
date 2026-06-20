@@ -1,14 +1,14 @@
 ---
 title: Mandatory Assignment 2
 author: Astrid Haarup Møller, Esmeralda Ophelia Larsson & Nanna Munch Kjøller
-date: 2024-04-11
+date: 2026-04-11
 date-format: MMMM DD, YYYY
 execute: 
   echo: false
   warning: false
 format:
   pdf: 
-    number-sections: true
+    number-sections: false
     colorlinks: true
     geometry:
       - top=20mm
@@ -23,71 +23,80 @@ format:
     highlight-style: github-light
 ---
 
-
-# Exercise
-
-## Exercise 1.
-The goal here is to construct a clean dataset for cross-sectional stock return prediction. We keep observations from January 2000 onward, select a limited set of influential predictors, document missing-value handling, and prepare a feature matrix with characteristic - macro interactions and industry dummies.
-
 ```{python}
-import pandas as pd
+# standard library
+from pathlib import Path
+import itertools
+
+# data handling and model storage
+import joblib
 import numpy as np
+import pandas as pd
 import tidyfinance as tf
+
+# plotting
 from plotnine import *
 from mizani.formatters import percent_format
+
+# statistical models
+import statsmodels.api as sm
+
+# machine learning
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import root_mean_squared_error
 ```
 
+## Exercise 1.
 ### 1a: Variable selection and sample restriction
-First we read in the monthly stock characteristics data and restricting the sample to observations dated on or after January 1, 2000.
+First, we remove observations before year 2000, then we select ten stock-level characteristics based on the variable-importance results in @Gu.2020, Figure 5. The selected variables cover price trends: `mom1m`, `mom12m`, size and liquidity: `mvel1`, `turn`, risk and volatility: `beta`
+`retvol`, and valuation/fundamentals: `bm`, `ep`, `roaq`, `invest`.
+
+For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4 and include aggregate book-to-market (`bm`), the Treasury bill rate (`tbl`), the default yield spread (`dfy`), and the term spread (`tms`). These variables capture aggregate valuation, interest rate conditions, credit risk, and the slope of the yield curve.
 
 ```{python}
 #| echo: false
 #| cache: false
-# df = pd.read_parquet("//Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
+#df = pd.read_parquet("/Users/AstridMoeller/Documents/GitHub/AEF-git/data-python/stock_characteristics_monthly.parquet")
 
-# Reading in the file
-# df = pd.read_parquet("/Users/esmeraldalarsson/Desktop/Advanced Empirical Finance/stock_characteristics_monthly.parquet")
-
-df = pd.read_parquet("/Users/esmeraldalarsson/Desktop/Advanced Empirical Finance/stock_characteristics_monthly.parquet")
+df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
 df.head()
 
-# Keep observations from January 2000 onward
+# keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
 df = df.loc[df["date"] >= "2000-01-01"].copy()
 ```
 
-We select ten stock characteristics and four macro variables capturing key GKX themes and macroeconomic conditions, including valuation, interest rates, and credit risk.
-
 ```{python}
+
 stock_chars = [
-    "characteristic_mom12m",  # 12-month momentum
-    "characteristic_mom1m",   # Short-term reversal (replaces r2_1 — not in dataset)
-    "characteristic_mvel1",   # Size (log market cap)
-    "characteristic_bm",      # Book-to-market (value)
-    "characteristic_roaq",    # Return on assets (profitability)
-    "characteristic_ep",      # Earnings-to-price
-    "characteristic_turn",    # Share turnover (liquidity)
-    "characteristic_beta",    # Market beta
-    "characteristic_invest",  # Investment growth
-    "characteristic_acc",     # Accruals
+    "characteristic_mom1m",    # short-term reversal (price trend)
+    "characteristic_mom12m",   # 12-month momentum (price trend)
+    "characteristic_mvel1",    # size (liquidity)
+    "characteristic_turn",     # share turnover (liquidity)
+    "characteristic_beta",     # market beta (risk)
+    "characteristic_retvol",   # return volatility (risk)
+    "characteristic_bm",       # book-to-market (value)
+    "characteristic_ep",       # earnings-to-price (value)
+    "characteristic_roaq",     # profitability
+    "characteristic_invest",   # investment growth
 ]
 
 macro_vars = [
-    "macro_dp",   # Dividend-price ratio
-    "macro_ep",   # Earnings-price ratio
-    "macro_tbl",  # T-bill rate
-    "macro_dfy",  # Default yield spread
+    "macro_bm",    # aggregate book-to-market
+    "macro_tbl",   # T-bill rate
+    "macro_dfy",   # default yield spread
+    "macro_tms",   # term spread
 ]
 
 base_cols = ["permno", "date", "ret_excess", "mktcap_lag", "sic2"]
 df = df[base_cols + stock_chars + macro_vars].copy()
 ```
 
-The selected characteristics are economically interpretable and widely used in asset pricing. In particular, mom12m, mvel1, bm, and roaq capture momentum, size, value, and profitability. These are complemented by variables reflecting valuation, trading activity, risk, investment, and accounting quality. The macro variables summarize market valuation, interest rates, and credit conditions, which are standard predictors of returns.
 
 ### 1b: Summary Statistics and Missing Values
-Table 1 reports summary statistics for the selected predictors.
-
+Table 1 reports summary statistics for the selected predictors. Stock characteristics are approximately centered around zero and bounded close to $[-1,1]$, while macro variables vary at the monthly aggregate level. 
 ```{python}
 summary_table = (
     df[stock_chars + macro_vars]
@@ -99,11 +108,12 @@ summary_table = (
 summary_table
 ```
 
-The selected stock characteristics are approx centered around zero and bounded close to the [−1,1] interval, which is consistent with the scaling used in the provided dataset. The macro variables display much less cross-sectional variation because they are common state variables observed at the monthly level.
-
-To document data quality, we first count missing values before imputing.
+We next document missing values before applying the imputation procedure.
 
 ```{python}
+#| echo: false
+#| results: 'hide'
+
 missing_table = (
     df[stock_chars + macro_vars]
     .isna()
@@ -114,21 +124,26 @@ missing_table = (
 
 missing_table
 ```
-Missing stock characteristics are imputed using the monthly cross-sectional median, preserving contemporaneous information. Macroeconomic variables are forward- and backward-filled. Observations with missing excess returns or lagged market capitalization are dropped, as they are required for the analysis.
+
+Missing stock characteristics are imputed using the monthly cross-sectional median. This preserves the number of stock-month observations while using only contemporaneous information from the same month. The median is preferred to the mean because it is less sensitive to extreme firm-level observations, which are common in financial data.
+
+Macroeconomic variables are common to all firms in a given month and vary only over time. Missing macro values are therefore filled forward and backward to preserve the time series of aggregate state variables. Finally, observations with missing excess returns or lagged market capitalization are dropped because `ret_excess` is the prediction target and `mktcap_lag` is required to construct value-weighted portfolio returns.
 
 ```{python}
-# Impute stock characteristics with monthly cross-sectional medians
+# impute stock characteristics with monthly cross-sectional medians
 for col in stock_chars:
     df[col] = df.groupby("date")[col].transform(lambda x: x.fillna(x.median()))
 
-# Fill macro variables over time
+# fill macro variables over time
 df[macro_vars] = df[macro_vars].ffill().bfill()
 
-# Drop rows missing target or portfolio weight variable
+# drop rows missing target or portfolio weight variable
 df = df.dropna(subset=["ret_excess", "mktcap_lag"]).copy()
 ```
 
 ```{python}
+#| echo: false
+#| results: 'hide'
 post_missing = (
     df[stock_chars + macro_vars + ["ret_excess", "mktcap_lag"]]
     .isna()
@@ -140,7 +155,7 @@ post_missing = (
 post_missing
 ```
 
-Because the assignment allows the use of sic2, we recode the detailed SIC groups into the 10 major SIC divisions. This keeps the dimensionality manageable while retaining broad industry information.
+We recode `sic2` into the 10 major SIC divisions to retain broad industry information while keeping the feature space manageable. This reduces the number of industry dummy variables and lowers the risk that sparse industry categories create noisy predictors in the machine learning models.
 
 ```{python}
 def recode_sic(sic):
@@ -172,6 +187,7 @@ df["sic_division"] = df["sic2"].apply(recode_sic)
 ```
 
 ```{python}
+#| echo: false
 industry_counts = (
     df["sic_division"]
     .value_counts()
@@ -181,7 +197,9 @@ industry_counts = (
 
 industry_counts
 ```
-As a simple illustration of the target variable, Figure 1 plots the cross-sectional mean excess return by month.
+
+Figure 1 plots the monthly cross-sectional mean excess return. The series illustrates that average realized excess returns vary substantially over time, highlighting the noisy nature of stock return prediction.
+
 ```{python}
 monthly_mean_ret = (
     df.groupby("date", as_index=False)["ret_excess"]
@@ -202,13 +220,14 @@ monthly_mean_ret = (
 )
 ```
 
-The sample remains large and suitable for machine learning. Missing values are handled conservatively, with firm-level predictors imputed cross-sectionally and macro variables filled over time.
+Overall, the sample remains large after cleaning and is suitable for machine learning. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.
 
 ### 1c: Feature matrix construction
-The assignment asks for a feature matrix consisting of stock characteristics and all interactions between stock characteristics and macroeconomic variables. With 10 stock characteristics and 4 macro predictors, this yields 10+10×4=50 continuous predictors. We then add industry dummies based on the recoded SIC divisions.
+We construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
+
 
 ```{python}
-# Create stock characteristic × macro interactions
+# create stock characteristic × macro interactions
 interaction_cols = []
 for s in stock_chars:
     for m in macro_vars:
@@ -216,14 +235,14 @@ for s in stock_chars:
         df[name] = df[s] * df[m]
         interaction_cols.append(name)
 
-# One-hot encode broad industry groups
+# one-hot encode broad industry groups
 sic_dummies = pd.get_dummies(df["sic_division"], prefix="sic", drop_first=True, dtype=int)
 
-# Final feature sets
+# final feature sets
 continuous_features = stock_chars + interaction_cols
 dummy_features = list(sic_dummies.columns)
 
-# Build X, y, and metadata objects for later exercises
+# build feature matrix, target variable, and metadata
 X = pd.concat(
     [df[continuous_features].reset_index(drop=True),
      sic_dummies.reset_index(drop=True)],
@@ -235,47 +254,24 @@ y = df["ret_excess"].reset_index(drop=True)
 meta = df[["permno", "date", "mktcap_lag", "ret_excess"]].reset_index(drop=True)
 ```
 
-```{python}
-feature_overview = pd.DataFrame({
-    "object": ["X", "y", "meta"],
-    "shape": [X.shape, y.shape, meta.shape]
-})
-
-feature_overview
-```
-
-```{python}
-pd.DataFrame({
-    "feature_group": ["stock characteristics", "interaction terms", "industry dummies", "total features"],
-    "count": [len(stock_chars), len(interaction_cols), len(dummy_features), X.shape[1]]
-})
-```
-
-The final feature matrix contains the 10 selected stock characteristics, 40 interaction terms between stock characteristics and macroeconomic variables, and industry dummies for the broad SIC divisions. 
 
 ## Exercise 2
 ### Exercise 2a: Model descriptions
+**Elastic Net** is a penalized linear regression model that combines the variable selection property of the Lasso with the coefficient shrinkage of Ridge regression. It is useful in our setting because the feature matrix contains many correlated predictors, including characteristic-macro interactions. The model minimizes prediction error while penalizing large coefficients, which helps reduce overfitting.
 
-**Elastic Net** is a penalized linear regression model that combines the $L_1$ penalty from the Lasso and the $L_2$ penalty from Ridge regression. It minimizes
-$$
-\min_{\beta} \frac{1}{N} \sum_{i=1}^N (y_i - x_i'\beta)^2 + \alpha \left( \lambda \|\beta\|_1 + (1-\lambda)\|\beta\|_2^2 \right)
-$$
-where the first term is the mean squared prediction error and the second penalizes coefficient size, helping to control overfitting in high-dimensional settings with correlated predictors, as in our feature matrix.
+The key hyperparameters are the overall penalty strength (`alpha`) and the mixing parameter (`l1_ratio`). A higher `alpha` implies stronger regularization, while `l1_ratio` controls the balance between Lasso and Ridge. When `l1_ratio = 1`, the model corresponds to the Lasso; when `l1_ratio = 0`, it corresponds to Ridge regression.
 
-The key hyperparameters are the overall penalty strength (`alpha`) and the mixing parameter (`l1_ratio`), where `l1_ratio = 1` corresponds to the Lasso and `l1_ratio = 0` to Ridge.
+**Random Forest** is a nonlinear tree-based ensemble model. It builds many regression trees on different bootstrap samples of the data and averages their predictions. Each tree recursively splits the feature space into groups with similar realized excess returns. Averaging across trees reduces the instability of individual decision trees and helps improve out-of-sample performance.
 
-**Neural Network (MLP)** approximates $g(z_{i,t})$ as a composition of linear transformations and nonlinear activation functions across multiple hidden layers. The model is trained by minimizing the mean squared prediction error. Each neuron computes $x_k^l = f\left(\theta_0^k + \sum_j z_j \theta_j^k\right)$, where $f$ is the ReLU activation function, and the network is trained via backpropagation.
+The key hyperparameters are the number of trees (`n_estimators`), the number of predictors considered at each split (`max_features`), the minimum number of observations required in a leaf (`min_samples_leaf`), and tree depth (`max_depth`). Compared with Elastic Net, Random Forest is more flexible because it can capture nonlinearities and interactions without imposing a linear functional form.
 
-The key hyperparameters are the number and size of hidden layers (`hidden_layer_sizes`), the $L_2$ regularization strength (`alpha`), and the maximum number of iterations (`max_iter`).
-
-The two models provide a comparison between a structured, regularized linear benchmark and a more flexible nonlinear model.
+Together, the two models provide a comparison between a regularized linear benchmark and a flexible nonlinear machine learning model.
 
 ### Exercise 2b: Time-respecting data split
 ```{python}
 #| echo: false
-from sklearn.preprocessing import StandardScaler
 
-# Split by unique dates rather than raw rows
+# split by unique dates rather than raw rows
 unique_dates = sorted(meta["date"].unique())
 
 n_dates = len(unique_dates)
@@ -302,7 +298,7 @@ meta_train = meta.loc[train_mask].reset_index(drop=True).copy()
 meta_val   = meta.loc[val_mask].reset_index(drop=True).copy()
 meta_test  = meta.loc[test_mask].reset_index(drop=True).copy()
 
-# Standardize continuous predictors using training data only
+# standardize continuous predictors using training data only
 continuous_features = stock_chars + interaction_cols
 
 scaler = StandardScaler()
@@ -328,33 +324,36 @@ split_summary = pd.DataFrame({
 
 split_summary
 ```
-The dataset is split chronologically to avoid look-ahead bias, ensuring that training observations precede validation observations, which in turn precede test observations. The most recent 20% of months are reserved as the test set, providing a truly out-of-sample evaluation period.
 
-The remaining 80% is split into 75% training and 25% validation, yielding an approximate 60/20/20 split. This reflects a trade-off between reliable parameter estimation and effective model selection.
+The dataset is split chronologically to avoid look-ahead bias. Training observations precede validation observations, which in turn precede test observations. The most recent 20% of months are reserved for the test set and are only used for final out-of-sample evaluation.
 
-The split is done at the monthly level to preserve the panel structure. Continuous predictors are standardized using the training data only, and the same transformation is applied to validation and test sets to avoid data leakage.
+The remaining 80% of months is split into training and validation samples, yielding an approximate 60/20/20 split. The training set is used to estimate model parameters, while the validation set is used for hyperparameter tuning. The split is performed by month rather than by individual rows to preserve the panel structure.
+
+Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.
+
 
 ### Exercise 2c: Hyperparameter tuning
-```{python}
-#| cache: true
-import itertools
-from sklearn.linear_model import ElasticNet
-from sklearn.neural_network import MLPRegressor
-from sklearn.metrics import root_mean_squared_error
-```
+
 ```{python}
 #| echo: false
 #| cache: true
 
+# Elastic Net hyperparameter grid
 en_param_grid = {
-    "alpha": [0.001, 0.1],
-    "l1_ratio": [0.2, 0.8],
+    "alpha": [0.001, 0.01, 0.1],
+    "l1_ratio": [0.2, 0.5, 0.8],
 }
 
 en_results = []
 
 for params in [dict(zip(en_param_grid, v)) for v in itertools.product(*en_param_grid.values())]:
-    model = ElasticNet(max_iter=5000, fit_intercept=True, **params)
+    model = ElasticNet(
+        max_iter=5000,
+        fit_intercept=True,
+        random_state=42,
+        **params
+    )
+
     model.fit(X_train, y_train)
 
     en_results.append({
@@ -369,105 +368,119 @@ best_en_params = en_results_df.iloc[0][["alpha", "l1_ratio"]].to_dict()
 
 en_results_df.round(6)
 ```
+
 ```{python}
 #| echo: false
 #| cache: true
 
-nn_param_grid = {
-    "hidden_layer_sizes": [(32, 16)],
-    "alpha": [0.001, 0.01],
+# random forest hyperparameter grid
+rf_param_grid = {
+    "n_estimators": [30],
+    "max_features": ["sqrt"],
+    "min_samples_leaf": [100],
+    "max_depth": [5, 10],
 }
 
-nn_results = []
+rf_results = []
 
-for params in [dict(zip(nn_param_grid, v)) for v in itertools.product(*nn_param_grid.values())]:
-    model = MLPRegressor(
-        activation="relu",
-        solver="adam",
-        max_iter=50,
+for params in [dict(zip(rf_param_grid, v)) for v in itertools.product(*rf_param_grid.values())]:
+    model = RandomForestRegressor(
         random_state=42,
+        n_jobs=-1,
         **params
     )
+
     model.fit(X_train, y_train)
 
-    nn_results.append({
-        "hidden_layers": str(params["hidden_layer_sizes"]),
-        "alpha": params["alpha"],
+    rf_results.append({
+        **params,
         "train_rmse": root_mean_squared_error(y_train, model.predict(X_train)),
         "val_rmse": root_mean_squared_error(y_val, model.predict(X_val))
     })
 
-nn_results_df = pd.DataFrame(nn_results).sort_values("val_rmse")
-best_nn_params = nn_results_df.iloc[0]
+rf_results_df = pd.DataFrame(rf_results).sort_values("val_rmse")
 
-nn_results_df.round(6)
+best_rf_params = rf_results_df.iloc[0][
+    ["n_estimators", "max_features", "min_samples_leaf", "max_depth"]
+].to_dict()
+
+rf_results_df.round(6)
 ```
+
 ```{python}
 #| echo: false
 #| cache: true
-import ast
 
-# Fit final models
+# fit final elastic net model using selected hyperparameters
 final_en = ElasticNet(
     alpha=best_en_params["alpha"],
     l1_ratio=best_en_params["l1_ratio"],
     max_iter=5000,
-    fit_intercept=True
-)
-final_en.fit(X_train, y_train)
-
-best_hidden = ast.literal_eval(best_nn_params["hidden_layers"])
-final_nn = MLPRegressor(
-    hidden_layer_sizes=best_hidden,
-    alpha=best_nn_params["alpha"],
-    activation="relu",
-    solver="adam",
-    max_iter=50,
+    fit_intercept=True,
     random_state=42
 )
-final_nn.fit(X_train, y_train)
 
-# Compute validation RMSE
-val_results = pd.DataFrame({
-    "Model": ["Elastic Net", "Neural Network"],
+final_en.fit(X_train, y_train)
+
+# fit final random forest model using selected hyperparameters
+final_rf = RandomForestRegressor(
+    n_estimators=int(best_rf_params["n_estimators"]),
+    max_features=best_rf_params["max_features"],
+    min_samples_leaf=int(best_rf_params["min_samples_leaf"]),
+    max_depth=int(best_rf_params["max_depth"]),
+    random_state=42,
+    n_jobs=-1
+)
+
+final_rf.fit(X_train, y_train)
+
+# compare selected models on training and validation samples
+model_selection_results = pd.DataFrame({
+    "Model": ["Elastic Net", "Random Forest"],
+    "Train RMSE": [
+        root_mean_squared_error(y_train, final_en.predict(X_train)),
+        root_mean_squared_error(y_train, final_rf.predict(X_train))
+    ],
     "Validation RMSE": [
         root_mean_squared_error(y_val, final_en.predict(X_val)),
-        root_mean_squared_error(y_val, final_nn.predict(X_val))
+        root_mean_squared_error(y_val, final_rf.predict(X_val))
     ]
-})
+}).round(6)
 
-val_results.round(6)
+model_selection_results
 ```
 
-Hyperparameters are tuned using grid search, where each specification is evaluated on the validation set using RMSE, consistent with the MSPE objective in GKX. The Elastic Net grid varies both penalty strength and the balance between $L_1$ and $L_2$ regularization, while the Neural Network grid varies the regularization strength for a fixed architecture.
+```{python}
+selected_hyperparameters = pd.DataFrame([
+    {"Model": "Elastic Net", **best_en_params},
+    {"Model": "Random Forest", **best_rf_params}
+])
 
-The results illustrate the bias–variance trade-off: lower training RMSE does not necessarily imply lower validation RMSE. Weaker regularization may lead to overfitting, while stronger regularization increases bias but can improve generalization.
+selected_hyperparameters
+```
 
-The final model for each method is selected based on the lowest validation RMSE to maximize out-of-sample predictive performance.
+Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the mean squared prediction error objective in @Gu.2020. For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, the grid varies the number of predictors considered at each split (`max_features`), the minimum leaf size (`min_samples_leaf`), and the maximum tree depth (`max_depth`).
+
+The final specification for each model is selected as the one with the lowest validation RMSE. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
 
 ### Exercise 2d: Save models to disk
 ```{python}
 #| echo: false
 #| results: 'hide'
 
-import joblib
-
 joblib.dump(final_en, "model_elastic_net.joblib")
-joblib.dump(final_nn, "model_neural_network.joblib")
+joblib.dump(final_rf, "model_random_forest.joblib")
 ```
 
 To load the models for peer review, run:
 ```{python}
 #| eval: false
 #| echo: true
-import joblib
 final_en = joblib.load("model_elastic_net.joblib")
-final_nn = joblib.load("model_neural_network.joblib")
+final_rf = joblib.load("model_random_forest.joblib")
 ```
 
-The final fitted models are saved to disk using the `joblib` library to ensure reproducibility and facilitate peer review. Saving the trained models allows others to load the exact same fitted objects without re-running the entire estimation procedure, which can be computationally intensive given the large dataset.
-
-To load the models for replication or further analysis, the following code can be used:
+The final fitted models are saved to disk using `joblib` to ensure reproducibility and facilitate peer review. Saving the trained models allows others to load the exact same fitted objects without re-running the full hyperparameter tuning procedure.
 
 ## Exercise 3
 ### Exercise 3a: Generate predicted excess returns
@@ -476,21 +489,21 @@ To load the models for replication or further analysis, the following code can b
 #| echo: false
 #| results: 'hide'
 
-# Generate predictions directly from fitted models
+# generate predictions directly from fitted models
 pred_val_en = final_en.predict(X_val)
-pred_val_nn = final_nn.predict(X_val)
+pred_val_rf = final_rf.predict(X_val)
 
 pred_test_en = final_en.predict(X_test)
-pred_test_nn = final_nn.predict(X_test)
+pred_test_rf = final_rf.predict(X_test)
 
-# Add predictions to metadata
+# add predictions to metadata
 meta_val = meta_val.copy()
 meta_val["pred_en"] = pred_val_en
-meta_val["pred_nn"] = pred_val_nn
+meta_val["pred_rf"] = pred_val_rf
 
 meta_test = meta_test.copy()
 meta_test["pred_en"] = pred_test_en
-meta_test["pred_nn"] = pred_test_nn
+meta_test["pred_rf"] = pred_test_rf
 ```
 
 Using the fitted models, we generate predicted excess returns for each stock-month observation in the validation and test samples. These predictions reflect expected returns based on firm characteristics, macroeconomic variables, and their interactions.
@@ -521,10 +534,10 @@ def assign_deciles(df, pred_col, decile_col):
     return df
 
 meta_val = assign_deciles(meta_val, "pred_en", "decile_en")
-meta_val = assign_deciles(meta_val, "pred_nn", "decile_nn")
+meta_val = assign_deciles(meta_val, "pred_rf", "decile_rf")
 
 meta_test = assign_deciles(meta_test, "pred_en", "decile_en")
-meta_test = assign_deciles(meta_test, "pred_nn", "decile_nn")
+meta_test = assign_deciles(meta_test, "pred_rf", "decile_rf")
 ```
 
 Stocks are sorted into decile portfolios each month based on predicted excess returns. Within each month, stocks are ranked and divided into ten groups of approximately equal size, from the lowest (decile 0) to the highest (decile 9).
@@ -582,17 +595,17 @@ def compute_longshort(df, decile_col):
     return out.set_index("date")
 
 ls_val_en  = compute_longshort(meta_val,  "decile_en")
-ls_val_nn  = compute_longshort(meta_val,  "decile_nn")
+ls_val_rf  = compute_longshort(meta_val,  "decile_rf")
+
 ls_test_en = compute_longshort(meta_test, "decile_en")
-ls_test_nn = compute_longshort(meta_test, "decile_nn")
+ls_test_rf = compute_longshort(meta_test, "decile_rf")
 ```
 
 ### Exercise 3d: Performance metrics
+The market benchmark is constructed as the value-weighted average excess return across all stocks in the relevant sample. This makes the benchmark comparable to the long-short portfolio, since both returns are measured in excess of the risk-free rate. CAPM alpha is estimated by regressing the long-short portfolio excess return on the value-weighted market excess return.
 ```{python}
 #| echo: false
 #| results: 'hide'
-
-import statsmodels.api as sm
 
 def portfolio_stats(ls_returns, market_returns=None):
     r = ls_returns["ls_ret"]
@@ -601,8 +614,8 @@ def portfolio_stats(ls_returns, market_returns=None):
 
     if market_returns is not None:
         aligned = pd.concat([r, market_returns], axis=1).dropna()
-        aligned.columns = ["ls_ret", "mkt_ret"]
-        X_capm = sm.add_constant(aligned["mkt_ret"])
+        aligned.columns = ["ls_ret", "mkt_excess_ret"]
+        X_capm = sm.add_constant(aligned["mkt_excess_ret"])
         res = sm.OLS(aligned["ls_ret"], X_capm).fit()
         alpha   = res.params["const"] * 12
         alpha_t = res.tvalues["const"]
@@ -616,21 +629,21 @@ def portfolio_stats(ls_returns, market_returns=None):
         "alpha_t": alpha_t
     }
 
-# Market returns
+# market excess returns
 mkt_val = meta_val.groupby("date").apply(
     lambda g: np.average(g["ret_excess"], weights=g["mktcap_lag"])
-).rename("mkt_ret")
+).rename("mkt_excess_ret")
 
 mkt_test = meta_test.groupby("date").apply(
     lambda g: np.average(g["ret_excess"], weights=g["mktcap_lag"])
-).rename("mkt_ret")
+).rename("mkt_excess_ret")
 
-# Collect results
+# collect results
 results_3d = [
     {"Model": "Elastic Net", "Sample": "Validation", **portfolio_stats(ls_val_en, mkt_val)},
-    {"Model": "Neural Network", "Sample": "Validation", **portfolio_stats(ls_val_nn, mkt_val)},
+    {"Model": "Random Forest", "Sample": "Validation", **portfolio_stats(ls_val_rf, mkt_val)},
     {"Model": "Elastic Net", "Sample": "Test", **portfolio_stats(ls_test_en, mkt_test)},
-    {"Model": "Neural Network", "Sample": "Test", **portfolio_stats(ls_test_nn, mkt_test)},
+    {"Model": "Random Forest", "Sample": "Test", **portfolio_stats(ls_test_rf, mkt_test)},
 ]
 
 results_3d_df = pd.DataFrame(results_3d)
@@ -638,7 +651,6 @@ results_3d_df = pd.DataFrame(results_3d)
 
 ```{python}
 #| echo: false
-
 results_3d_df.round(4)
 ```
 
@@ -670,14 +682,14 @@ def compute_turnover(df, decile_col):
     return np.mean(turnovers)
 
 to_val_en  = compute_turnover(meta_val,  "decile_en")
-to_val_nn  = compute_turnover(meta_val,  "decile_nn")
+to_val_rf  = compute_turnover(meta_val,  "decile_rf")
 to_test_en = compute_turnover(meta_test, "decile_en")
-to_test_nn = compute_turnover(meta_test, "decile_nn")
+to_test_rf = compute_turnover(meta_test, "decile_rf")
 
 turnover_df = pd.DataFrame({
-    "Model": ["Elastic Net", "Neural Network"],
-    "Validation": [to_val_en, to_val_nn],
-    "Test": [to_test_en, to_test_nn]
+    "Model": ["Elastic Net", "Random Forest"],
+    "Validation": [to_val_en, to_val_rf],
+    "Test": [to_test_en, to_test_rf]
 })
 ```
 
@@ -694,10 +706,10 @@ turnover_df.round(3)
 #| fig-height: 4
 
 fig_data = pd.DataFrame({
-    "EN_val":  (1 + ls_val_en["ls_ret"]).cumprod(),
-    "NN_val":  (1 + ls_val_nn["ls_ret"]).cumprod(),
-    "EN_test": (1 + ls_test_en["ls_ret"]).cumprod(),
-    "NN_test": (1 + ls_test_nn["ls_ret"]).cumprod(),
+    "Elastic Net validation":  (1 + ls_val_en["ls_ret"]).cumprod(),
+    "Random Forest validation":  (1 + ls_val_rf["ls_ret"]).cumprod(),
+    "Elastic Net test": (1 + ls_test_en["ls_ret"]).cumprod(),
+    "Random Forest test": (1 + ls_test_rf["ls_ret"]).cumprod(),
 }).reset_index().melt(
     id_vars="date",
     var_name="Model",
@@ -717,19 +729,21 @@ fig_data = pd.DataFrame({
 )
 ```
 
-Both models are compared across Sharpe ratio, CAPM alpha, and portfolio turnover. The Elastic Net is the linear benchmark and tends to have lower turnover due to its smooth, stable coefficient structure. The Neural Network captures nonlinear interactions but may overfit to short-lived patterns, leading to higher turnover and potentially lower net-of-cost returns. If the Neural Network's alpha does not sufficiently exceed the Elastic Net's to compensate for higher turnover costs, the Elastic Net is preferable from an investor's perspective.
+Both models are compared across Sharpe ratio, CAPM alpha, and portfolio turnover. Elastic Net is the regularized linear benchmark and tends to produce smoother predictions because it imposes a linear structure and coefficient shrinkage. Random Forest is more flexible and can capture nonlinearities and interactions between predictors, but this flexibility may also lead to higher portfolio turnover if the ranking of stocks changes more frequently over time. From an investor's perspective, the preferred model is the one that delivers stronger risk-adjusted performance and alpha without requiring excessive turnover.
 
 ## Exercise 4
 
 ### Exercise 4a: Variable importance
 
 ```{python}
+#| echo: false
+#| cache: true
 
-# Baseline test Sharpe ratios from Exercise 3d
+# baseline test Sharpe ratios from Exercise 3
 baseline_sharpe_en = ls_test_en["ls_ret"].mean() / ls_test_en["ls_ret"].std() * np.sqrt(12)
-baseline_sharpe_nn = ls_test_nn["ls_ret"].mean() / ls_test_nn["ls_ret"].std() * np.sqrt(12)
+baseline_sharpe_rf = ls_test_rf["ls_ret"].mean() / ls_test_rf["ls_ret"].std() * np.sqrt(12)
 
-# Reference values:
+# reference values:
 # standardized continuous predictors -> 0
 # industry dummies -> mean in the test set
 reference_values = {
@@ -737,8 +751,19 @@ reference_values = {
     for col in X_test.columns
 }
 
-def variable_importance_sharpe_drop(model, X_test, meta_test, pred_col, decile_col,
-                                    baseline_sharpe, reference_values):
+def variable_importance_sharpe_drop(
+    model,
+    X_test,
+    meta_test,
+    pred_col,
+    decile_col,
+    baseline_sharpe,
+    reference_values
+):
+    """
+    Measure variable importance as the drop in annualized test Sharpe ratio
+    when one predictor is set to a reference value and the portfolio is rebuilt.
+    """
     results = []
 
     for feature in X_test.columns:
@@ -764,54 +789,69 @@ def variable_importance_sharpe_drop(model, X_test, meta_test, pred_col, decile_c
     )
 
 vi_en = variable_importance_sharpe_drop(
-    final_en, X_test, meta_test, "pred_en_vi", "decile_en_vi",
-    baseline_sharpe_en, reference_values
+    final_en,
+    X_test,
+    meta_test,
+    "pred_en_vi",
+    "decile_en_vi",
+    baseline_sharpe_en,
+    reference_values
 )
 
-vi_nn = variable_importance_sharpe_drop(
-    final_nn, X_test, meta_test, "pred_nn_vi", "decile_nn_vi",
-    baseline_sharpe_nn, reference_values
+vi_rf = variable_importance_sharpe_drop(
+    final_rf,
+    X_test,
+    meta_test,
+    "pred_rf_vi",
+    "decile_rf_vi",
+    baseline_sharpe_rf,
+    reference_values
 )
 
 top3_en = vi_en.head(3).copy()
 top3_en["model"] = "Elastic Net"
 
-top3_nn = vi_nn.head(3).copy()
-top3_nn["model"] = "Neural Network"
+top3_rf = vi_rf.head(3).copy()
+top3_rf["model"] = "Random Forest"
 
-top3_importance = pd.concat([top3_en, top3_nn], ignore_index=True)
+top3_importance = pd.concat([top3_en, top3_rf], ignore_index=True)
 top3_importance = top3_importance[["model", "feature", "sharpe_drop"]]
 
 top3_importance.round(4)
 ```
 
-Variable importance is measured as the drop in annualized test Sharpe ratio when one predictor is set to its mean and the long-short portfolio is rebuilt. For the Elastic Net, the top three predictors all have a Sharpe-ratio drop of 0.0000, indicating no meaningful variable importance under this metric. For the Neural Network, the most important predictors are characteristic_beta_x_macro_ep, sic_Manufacturing, and sic_Retail.
+Variable importance is measured as the drop in annualized test Sharpe ratio when one predictor is set to a reference value and the long-short portfolio is rebuilt. For standardized continuous predictors, the reference value is zero, corresponding to the training-sample mean after standardization. For industry dummies, the reference value is set to the test-sample mean.
+
+This portfolio-based importance measure evaluates whether a predictor matters for the final investment strategy rather than only for return prediction accuracy. A larger Sharpe-ratio drop indicates that removing the information in that predictor reduces the economic value of the model.
 
 
 ### Exercise 4b: Ranking comparison
 ```{python}
-
+#| echo: false
 
 rank_compare = (
     vi_en.rename(columns={"sharpe_drop": "sharpe_drop_en"})
     .merge(
-        vi_nn.rename(columns={"sharpe_drop": "sharpe_drop_nn"}),
+        vi_rf.rename(columns={"sharpe_drop": "sharpe_drop_rf"}),
         on="feature",
         how="outer"
     )
 )
 
 rank_compare["rank_en"] = rank_compare["sharpe_drop_en"].rank(ascending=False, method="min")
-rank_compare["rank_nn"] = rank_compare["sharpe_drop_nn"].rank(ascending=False, method="min")
-rank_compare["rank_gap"] = (rank_compare["rank_en"] - rank_compare["rank_nn"]).abs()
+rank_compare["rank_rf"] = rank_compare["sharpe_drop_rf"].rank(ascending=False, method="min")
+rank_compare["rank_gap"] = (rank_compare["rank_en"] - rank_compare["rank_rf"]).abs()
 
-rank_compare[["feature", "rank_en", "rank_nn", "rank_gap"]].sort_values(
-    "rank_gap", ascending=False
+rank_compare[["feature", "rank_en", "rank_rf", "rank_gap"]].sort_values(
+    "rank_gap",
+    ascending=False
 ).head(5).round(1)
 ```
 
-The rankings differ strongly across models. The Elastic Net shows almost no sensitivity to individual predictors, while the Neural Network places importance on one interaction term and two industry dummies. This likely reflects the Neural Network’s greater flexibility. However, its results should be interpreted cautiously because its test Sharpe ratio is negative.
+The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.
 
 ### Exercise 4c: Findings to financial theory
 
-The main Neural Network signal is characteristic_beta_x_macro_ep, which suggests state-dependent predictability: the pricing of market beta varies with aggregate valuation conditions. The importance of sic_Manufacturing and sic_Retail indicates that industry exposure also matters. Overall, the findings point more to state-dependent and industry-specific effects than to strong standalone linear premiums.
+The variable-importance results can be interpreted in relation to financial theory. If momentum-related variables rank highly, this is consistent with return continuation or reversal effects. If valuation variables such as book-to-market or earnings-to-price are important, the results point toward value-based predictability. Risk-related variables such as beta or return volatility can be interpreted as compensation for systematic or idiosyncratic risk, while industry dummies suggest that expected returns vary across sectors.
+
+Because Random Forest can capture nonlinearities and interactions, its most important variables may reflect state-dependent effects rather than simple standalone return premia. Overall, the variable-importance exercise links the machine-learning predictions back to economically interpretable return predictors.
