@@ -52,7 +52,9 @@ from sklearn.metrics import root_mean_squared_error
 ## Exercise 1
 ### 1a: Variable selection and sample restriction
 First, we remove observations before year 2000, then we select ten stock-level characteristics based on the variable-importance results in @Gu.2020, Figure 5. The selected variables cover price trends: `mom1m`, `mom12m`, size and liquidity: `mvel1`, `turn`, risk and volatility: `beta`,
-`retvol`, and valuation/fundamentals: `bm`, `ep`, `roaq`, `invest`. For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4 and include aggregate book-to-market (`bm`), the Treasury bill rate (`tbl`), the default yield spread (`dfy`), and the term spread (`tms`). These variables capture aggregate valuation, interest rate conditions, credit risk, and the slope of the yield curve.
+`retvol`, and valuation/fundamentals: `bm`, `ep`, `roaq`, `invest`. 
+
+For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4 and include aggregate book-to-market (`bm`), the Treasury bill rate (`tbl`), the default yield spread (`dfy`), and the term spread (`tms`). These variables capture aggregate valuation, interest rate conditions, credit risk, and the slope of the yield curve.
 
 ```{python}
 #| cache: false
@@ -91,8 +93,7 @@ df = df[base_cols + stock_chars + macro_vars].copy()
 
 
 ### 1b: Summary Statistics and Missing Values
-@tbl-summary-statistics reports summary statistics for the selected predictors. Stock characteristics are approximately centered around zero and bounded close to $[-1,1]$, while macro variables vary at the monthly aggregate level. 
-
+@tbl-summary-statistics reports summary statistics for the selected predictors. 
 ```{=latex}
 \begingroup
 \footnotesize
@@ -196,9 +197,9 @@ industry_counts = (
 Overall, the sample remains large after cleaning and is suitable for machine learning. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.
 
 ### 1c: Feature matrix construction
+Using Python and `sklearn`, we prepare the feature matrix by manually constructing all characteristic-macro interactions and one-hot encoding the recoded SIC industry groups.
+
 We construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
-
-
 ```{python}
 # create stock characteristic × macro interactions
 interaction_cols = []
@@ -241,7 +242,14 @@ The key hyperparameters are the number of trees (`n_estimators`), the number of 
 Together, the two models provide a comparison between a regularized linear benchmark and a flexible nonlinear machine learning model.
 
 ### Exercise 2b: Time-respecting data split
+The dataset is split chronologically to avoid look-ahead bias. Training observations precede validation observations, which in turn precede test observations. The most recent 20% of months are reserved for the test set and are only used for final out-of-sample evaluation, as shown in @tbl-split.
+
+The remaining 80% of months is split into training and validation samples, yielding an approximate 60/20/20 split. The training set is used to estimate model parameters, while the validation set is used for hyperparameter tuning. The split is performed by month rather than by individual rows to preserve the panel structure.
+
 ```{python}
+#| label: tbl-split
+#| tbl-cap: "Time-respecting train/validation/test split with date ranges and sizes."
+
 # split by unique dates rather than raw rows
 unique_dates = sorted(meta["date"].unique())
 
@@ -295,14 +303,11 @@ split_summary = pd.DataFrame({
 split_summary
 ```
 
-The dataset is split chronologically to avoid look-ahead bias. Training observations precede validation observations, which in turn precede test observations. The most recent 20% of months are reserved for the test set and are only used for final out-of-sample evaluation.
-
-The remaining 80% of months is split into training and validation samples, yielding an approximate 60/20/20 split. The training set is used to estimate model parameters, while the validation set is used for hyperparameter tuning. The split is performed by month rather than by individual rows to preserve the panel structure.
-
 Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.
 
-
 ### Exercise 2c: Hyperparameter tuning
+Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the mean squared prediction error objective in @Gu.2020. For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, we vary tree depth while keeping the number of trees, feature subsampling rule, and minimum leaf size fixed. This allows us to examine how increasing model complexity affects predictive accuracy while keeping computation feasible.
+
 
 ```{python}
 #| cache: true
@@ -334,8 +339,6 @@ for params in [dict(zip(en_param_grid, v)) for v in itertools.product(*en_param_
 en_results_df = pd.DataFrame(en_results).sort_values("val_rmse")
 
 best_en_params = en_results_df.iloc[0][["alpha", "l1_ratio"]].to_dict()
-
-en_results_df.round(6)
 ```
 
 ```{python}
@@ -372,11 +375,15 @@ best_rf_params = rf_results_df.iloc[0][
     ["n_estimators", "max_features", "min_samples_leaf", "max_depth"]
 ].to_dict()
 
-rf_results_df.round(6)
 ```
+
+The model selection is shown in @tbl-model-selection. The final specification for each model is selected as the one with the lowest validation RMSE. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
+
 
 ```{python}
 #| cache: true
+#| label: tbl-model-selection
+#| tbl-cap: "Selected hyperparameters and validation RMSE"
 
 # fit final elastic net model using selected hyperparameters
 final_en = ElasticNet(
@@ -402,8 +409,12 @@ final_rf = RandomForestRegressor(
 final_rf.fit(X_train, y_train)
 
 # compare selected models on training and validation samples
-model_selection_results = pd.DataFrame({
+selected_results = pd.DataFrame({
     "Model": ["Elastic Net", "Random Forest"],
+    "Selected specification": [
+        f"alpha={best_en_params['alpha']}, l1_ratio={best_en_params['l1_ratio']}",
+        f"trees={int(best_rf_params['n_estimators'])}, depth={int(best_rf_params['max_depth'])}, leaf={int(best_rf_params['min_samples_leaf'])}"
+    ],
     "Train RMSE": [
         root_mean_squared_error(y_train, final_en.predict(X_train)),
         root_mean_squared_error(y_train, final_rf.predict(X_train))
@@ -414,21 +425,9 @@ model_selection_results = pd.DataFrame({
     ]
 }).round(6)
 
-model_selection_results
+selected_results.style.hide(axis="index")
 ```
 
-```{python}
-selected_hyperparameters = pd.DataFrame([
-    {"Model": "Elastic Net", **best_en_params},
-    {"Model": "Random Forest", **best_rf_params}
-])
-
-selected_hyperparameters
-```
-
-Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the mean squared prediction error objective in @Gu.2020. For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, the grid varies the number of predictors considered at each split (`max_features`), the minimum leaf size (`min_samples_leaf`), and the maximum tree depth (`max_depth`).
-
-The final specification for each model is selected as the one with the lowest validation RMSE. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
 
 ### Exercise 2d: Save models to disk
 ```{python}
@@ -446,7 +445,7 @@ final_en = joblib.load("model_elastic_net.joblib")
 final_rf = joblib.load("model_random_forest.joblib")
 ```
 
-The final fitted models are saved to disk using `joblib` to ensure reproducibility and facilitate peer review. Saving the trained models allows others to load the exact same fitted objects without re-running the full hyperparameter tuning procedure.
+The final fitted models are saved to disk using `joblib` to ensure reproducibility and facilitate peer review.
 
 ## Exercise 3
 ### Exercise 3a-c: Predictions and long-short portfolios
@@ -661,26 +660,34 @@ turnover_df.round(3)
 
 ### Exercise 3f: Model comparison
 ```{python}
+#| output: false
+
 en_test = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Test'").iloc[0]
 rf_test = results_3d_df.query("Model == 'Random Forest' and Sample == 'Test'").iloc[0]
 
-en_val = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Validation'").iloc[0]
-rf_val = results_3d_df.query("Model == 'Random Forest' and Sample == 'Validation'").iloc[0]
-
 en_turnover = turnover_df.query("Model == 'Elastic Net'").iloc[0]
 rf_turnover = turnover_df.query("Model == 'Random Forest'").iloc[0]
+
+preferred_model = "Elastic Net" if en_test["sharpe"] > rf_test["sharpe"] else "Random Forest"
+
+en_return_sign = "positive" if en_test["ann_mean"] > 0 else "negative"
+rf_return_sign = "positive" if rf_test["ann_mean"] > 0 else "negative"
+
+en_alpha_sign = "positive" if en_test["alpha"] > 0 else "negative"
+rf_alpha_sign = "positive" if rf_test["alpha"] > 0 else "negative"
+
+turnover_relation = "lower" if en_turnover["Test"] < rf_turnover["Test"] else "higher"
 ```
 
-### Exercise 3f: Model comparison
-For the selected hyperparameter specifications, Elastic Net is the preferred model from an investor perspective. In the test period, Elastic Net generates an annualized mean return of `{python} f"{en_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{en_test['sharpe']:.2f}"`, and a CAPM alpha of `{python} f"{en_test['alpha']*100:.2f}"`%. Random Forest performs poorly out-of-sample, with an annualized mean return of `{python} f"{rf_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{rf_test['sharpe']:.2f}"`, and a CAPM alpha of `{python} f"{rf_test['alpha']*100:.2f}"`%.
+For the selected hyperparameter specifications, `{python} preferred_model` is preferred from an investor perspective based on test-period risk-adjusted performance. In the test period, Elastic Net generates a `{python} en_return_sign` annualized mean return of `{python} f"{en_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{en_test['sharpe']:.2f}"`, and a `{python} en_alpha_sign` CAPM alpha of `{python} f"{en_test['alpha']*100:.2f}"`%. In comparison, Random Forest generates a `{python} rf_return_sign` annualized mean return of `{python} f"{rf_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{rf_test['sharpe']:.2f}"`, and a `{python} rf_alpha_sign` CAPM alpha of `{python} f"{rf_test['alpha']*100:.2f}"`%.
 
-@tbl-turnover shows that Elastic Net also has substantially lower turnover. In the test period, Elastic Net turnover is `{python} f"{en_turnover['Test']:.3f}"`, compared with `{python} f"{rf_turnover['Test']:.3f}"` for Random Forest. This matters because high turnover increases transaction costs and can erode gross portfolio returns. Overall, Elastic Net provides the better trade-off between risk-adjusted performance, alpha, and implementability.
+@tbl-turnover shows that Elastic Net has `{python} turnover_relation` turnover than Random Forest in the test period. Elastic Net turnover is `{python} f"{en_turnover['Test']:.3f}"`, compared with `{python} f"{rf_turnover['Test']:.3f}"` for Random Forest. This matters because high turnover increases transaction costs and can erode gross portfolio returns.
+
+Overall, Elastic Net provides the better trade-off between risk-adjusted performance, alpha, and implementability in our sample.
 
 
 ## Exercise 4
-
 ### Exercise 4a: Variable importance
-
 ```{python}
 #| cache: true
 
@@ -795,7 +802,6 @@ rank_compare[["feature", "rank_en", "rank_rf", "rank_gap"]].sort_values(
 The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.
 
 ### Exercise 4c: Findings to financial theory
+The Random Forest importance results suggest that portfolio performance is mainly driven by state-dependent valuation, volatility, and size effects. The largest Sharpe-ratio drop comes from `characteristic_ep_x_macro_bm`, indicating that the predictive value of earnings-to-price depends on aggregate book-to-market conditions. This is consistent with value-based return predictability varying across market valuation states.
 
-The variable-importance results can be interpreted in relation to financial theory. If momentum-related variables rank highly, this is consistent with return continuation or reversal effects. If valuation variables such as book-to-market or earnings-to-price are important, the results point toward value-based predictability. Risk-related variables such as beta or return volatility can be interpreted as compensation for systematic or idiosyncratic risk, while industry dummies suggest that expected returns vary across sectors.
-
-Because Random Forest can capture nonlinearities and interactions, its most important variables may reflect state-dependent effects rather than simple standalone return premia. Overall, the variable-importance exercise links the machine-learning predictions back to economically interpretable return predictors.
+The other top predictors, `characteristic_retvol_x_macro_tbl` and `characteristic_mvel1_x_` `macro_dfy`, suggest that volatility and size effects depend on interest rate conditions and credit risk. In contrast, Elastic Net produces near-zero importance scores, consistent with its strongly regularized linear structure. Overall, the results indicate that the Random Forest model extracts economic value primarily from nonlinear and macro-dependent interactions.
