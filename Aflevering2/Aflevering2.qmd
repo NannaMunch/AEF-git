@@ -51,7 +51,7 @@ from sklearn.metrics import root_mean_squared_error
 
 ## Exercise 1
 ### 1a: Variable selection and sample restriction
-First, we remove observations before year 2000, then we select ten stock-level characteristics based on the variable-importance results in @Gu.2020, Figure 5. The selected variables cover price trends: `mom1m`, `mom12m`, size and liquidity: `mvel1`, `turn`, risk and volatility: `beta`,
+First, we remove observations before year 2000, then we select ten stock-level characteristics guided by the variable-importance evidence in @Gu.2020, Figure 5. The selected variables cover price trends: `mom1m`, `mom12m`, size and liquidity: `mvel1`, `turn`, risk and volatility: `beta`,
 `retvol`, and valuation/fundamentals: `bm`, `ep`, `roaq`, `invest`. 
 
 For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4 and include aggregate book-to-market (`bm`), the Treasury bill rate (`tbl`), the default yield spread (`dfy`), and the term spread (`tms`). These variables capture aggregate valuation, interest rate conditions, credit risk, and the slope of the yield curve.
@@ -63,6 +63,7 @@ df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthl
 # keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
 df = df.loc[df["date"] >= "2000-01-01"].copy()
+
 ```
 
 ```{python}
@@ -91,6 +92,7 @@ base_cols = ["permno", "date", "ret_excess", "mktcap_lag", "sic2"]
 df = df[base_cols + stock_chars + macro_vars].copy()
 ```
 
+The dataset already aligns predictors at month $t$ with next-month excess returns, so we do not lead or lag any variables.
 
 ### 1b: Summary Statistics and Missing Values
 @tbl-summary-statistics reports summary statistics for the selected predictors. 
@@ -115,16 +117,6 @@ summary_table
 ```{=latex}
 \endgroup
 ```
-```{python}
-#| output: false
-missing_table = (
-    df[stock_chars + macro_vars]
-    .isna()
-    .sum()
-    .rename("n_missing")
-    .to_frame()
-)
-```
 
 Missing stock characteristics are imputed using the monthly cross-sectional median. This preserves the number of stock-month observations while using only contemporaneous information from the same month. The median is preferred to the mean because it is less sensitive to extreme firm-level observations, which are common in financial data.
 
@@ -142,17 +134,6 @@ df[macro_vars] = df[macro_vars].ffill().bfill()
 df = df.dropna(subset=["ret_excess", "mktcap_lag"]).copy()
 ```
 
-```{python}
-#| output: false
-post_missing = (
-    df[stock_chars + macro_vars + ["ret_excess", "mktcap_lag"]]
-    .isna()
-    .sum()
-    .rename("n_missing")
-    .to_frame()
-)
-
-```
 
 We recode `sic2` into the 10 major SIC divisions to retain broad industry information while keeping the feature space manageable. This reduces the number of industry dummy variables and lowers the risk that sparse industry categories create noisy predictors in the machine learning models.
 
@@ -186,19 +167,14 @@ df["sic_division"] = df["sic2"].apply(recode_sic)
 ```
 
 ```{python}
-industry_counts = (
-    df["sic_division"]
-    .value_counts()
-    .rename_axis("sic_division")
-    .reset_index(name="n_obs")
-)
+n_obs_final = len(df)
+n_firms_final = df["permno"].nunique()
+n_months_final = df["date"].nunique()
 ```
 
-Overall, the sample remains large after cleaning and is suitable for machine learning. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.
+After cleaning, the final sample contains `{python} f"{n_obs_final:,}"` stock-month observations across `{python} f"{n_firms_final:,}"` firms and `{python} n_months_final` months. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.
 
 ### 1c: Feature matrix construction
-Using Python and `sklearn`, we prepare the feature matrix by manually constructing all characteristic-macro interactions and one-hot encoding the recoded SIC industry groups.
-
 We construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
 ```{python}
 # create stock characteristic × macro interactions
@@ -300,7 +276,8 @@ split_summary = pd.DataFrame({
     "Months": [len(train_dates), len(val_dates), len(test_dates)],
     "Observations": [len(X_train), len(X_val), len(X_test)]
 })
-split_summary
+
+split_summary.style.hide(axis="index")
 ```
 
 Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.
@@ -500,7 +477,6 @@ meta_test = assign_deciles(meta_test, "pred_rf", "decile_rf")
 The long-short strategy buys the top predicted-return decile and shorts the bottom predicted-return decile. The monthly long-short return is therefore the value-weighted return of decile 9 minus the value-weighted return of decile 0.
 
 ```{python}
-#| output: false
 
 def compute_longshort(df, decile_col):
     """
@@ -611,7 +587,7 @@ results_3d_df = pd.DataFrame(results_3d)
 ```{python}
 #| label: tbl-performance
 #| tbl-cap: "Annualized long-short portfolio performance and market benchmark"
-results_3d_df.round(4)
+results_3d_df.round(4).style.hide(axis="index")
 ```
 
 ### Exercise 3e: Portfolio turnover
@@ -655,7 +631,7 @@ turnover_df = pd.DataFrame({
 #| label: tbl-turnover
 #| tbl-cap: "Average monthly portfolio turnover"
 
-turnover_df.round(3)
+turnover_df.round(3).style.hide(axis="index")
 ```
 
 ### Exercise 3f: Model comparison
