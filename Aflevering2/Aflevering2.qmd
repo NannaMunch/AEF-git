@@ -688,10 +688,12 @@ Overall, Elastic Net provides the better trade-off between risk-adjusted perform
 
 ## Exercise 4
 ### Exercise 4a: Variable importance
+
+Variable importance is measured as the drop in annualized test Sharpe ratio when one predictor is set to a reference value and the long-short portfolio is rebuilt. For standardized continuous predictors, the reference value is zero, corresponding to the training-sample mean after standardization. For industry dummies, the reference value is set to the test-sample mean.
 ```{python}
 #| cache: true
 
-# baseline test Sharpe ratios from Exercise 3
+# baseline test Sharpe ratios from exercise 3
 baseline_sharpe_en = ls_test_en["ls_ret"].mean() / ls_test_en["ls_ret"].std() * np.sqrt(12)
 baseline_sharpe_rf = ls_test_rf["ls_ret"].mean() / ls_test_rf["ls_ret"].std() * np.sqrt(12)
 
@@ -772,12 +774,11 @@ top3_importance = top3_importance[["model", "feature", "sharpe_drop"]]
 top3_importance.round(4)
 ```
 
-Variable importance is measured as the drop in annualized test Sharpe ratio when one predictor is set to a reference value and the long-short portfolio is rebuilt. For standardized continuous predictors, the reference value is zero, corresponding to the training-sample mean after standardization. For industry dummies, the reference value is set to the test-sample mean.
-
 This portfolio-based importance measure evaluates whether a predictor matters for the final investment strategy rather than only for return prediction accuracy. A larger Sharpe-ratio drop indicates that removing the information in that predictor reduces the economic value of the model.
 
 
 ### Exercise 4b: Ranking comparison
+The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.
 ```{python}
 
 rank_compare = (
@@ -799,9 +800,34 @@ rank_compare[["feature", "rank_en", "rank_rf", "rank_gap"]].sort_values(
 ).head(5).round(1)
 ```
 
-The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.
 
 ### Exercise 4c: Findings to financial theory
 The Random Forest importance results suggest that portfolio performance is mainly driven by state-dependent valuation, volatility, and size effects. The largest Sharpe-ratio drop comes from `characteristic_ep_x_macro_bm`, indicating that the predictive value of earnings-to-price depends on aggregate book-to-market conditions. This is consistent with value-based return predictability varying across market valuation states.
 
 The other top predictors, `characteristic_retvol_x_macro_tbl` and `characteristic_mvel1_x_` `macro_dfy`, suggest that volatility and size effects depend on interest rate conditions and credit risk. In contrast, Elastic Net produces near-zero importance scores, consistent with its strongly regularized linear structure. Overall, the results indicate that the Random Forest model extracts economic value primarily from nonlinear and macro-dependent interactions.
+
+
+```{python}
+ma2_elastic_net_bundle = {
+    "model": final_en,
+    "scaler": scaler,
+    "feature_columns": list(X_train.columns),
+    "continuous_features": continuous_features,
+    "stock_chars": stock_chars,
+    "macro_vars": macro_vars,
+    "dummy_features": dummy_features,
+}
+
+ma2_random_forest_bundle = {
+    "model": final_rf,
+    "scaler": scaler,
+    "feature_columns": list(X_train.columns),
+    "continuous_features": continuous_features,
+    "stock_chars": stock_chars,
+    "macro_vars": macro_vars,
+    "dummy_features": dummy_features,
+}
+
+joblib.dump(ma2_elastic_net_bundle, "ma2_elastic_net_bundle.joblib")
+joblib.dump(ma2_random_forest_bundle, "ma2_random_forest_bundle.joblib")
+```
