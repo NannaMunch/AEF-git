@@ -8,6 +8,7 @@ execute:
   warning: false
 format:
   pdf: 
+    titlepage: true
     number-sections: false
     colorlinks: true
     geometry:
@@ -48,20 +49,14 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import root_mean_squared_error
 ```
 
-## Exercise 1.
+## Exercise 1
 ### 1a: Variable selection and sample restriction
-First, we remove observations before year 2000, then we select ten stock-level characteristics based on the variable-importance results in @Gu.2020, Figure 5. The selected variables cover price trends: `mom1m`, `mom12m`, size and liquidity: `mvel1`, `turn`, risk and volatility: `beta`
-`retvol`, and valuation/fundamentals: `bm`, `ep`, `roaq`, `invest`.
-
-For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4 and include aggregate book-to-market (`bm`), the Treasury bill rate (`tbl`), the default yield spread (`dfy`), and the term spread (`tms`). These variables capture aggregate valuation, interest rate conditions, credit risk, and the slope of the yield curve.
+First, we remove observations before year 2000, then we select ten stock-level characteristics based on the variable-importance results in @Gu.2020, Figure 5. The selected variables cover price trends: `mom1m`, `mom12m`, size and liquidity: `mvel1`, `turn`, risk and volatility: `beta`,
+`retvol`, and valuation/fundamentals: `bm`, `ep`, `roaq`, `invest`. For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4 and include aggregate book-to-market (`bm`), the Treasury bill rate (`tbl`), the default yield spread (`dfy`), and the term spread (`tms`). These variables capture aggregate valuation, interest rate conditions, credit risk, and the slope of the yield curve.
 
 ```{python}
-#| echo: false
 #| cache: false
-#df = pd.read_parquet("/Users/AstridMoeller/Documents/GitHub/AEF-git/data-python/stock_characteristics_monthly.parquet")
-
 df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
-df.head()
 
 # keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
@@ -96,24 +91,31 @@ df = df[base_cols + stock_chars + macro_vars].copy()
 
 
 ### 1b: Summary Statistics and Missing Values
-Table 1 reports summary statistics for the selected predictors. Stock characteristics are approximately centered around zero and bounded close to $[-1,1]$, while macro variables vary at the monthly aggregate level. 
+@tbl-summary-statistics reports summary statistics for the selected predictors. Stock characteristics are approximately centered around zero and bounded close to $[-1,1]$, while macro variables vary at the monthly aggregate level. 
+
+```{=latex}
+\begingroup
+\footnotesize
+```
 ```{python}
+#| label: tbl-summary-statistics
+#| tbl-cap: "Summary statistics for selected predictors"
+
 summary_table = (
     df[stock_chars + macro_vars]
     .describe()
-    .T[["mean", "std", "min", "25%", "50%", "75%", "max"]]
+    .T[["mean", "std", "25%", "50%", "75%"]]
     .round(3)
 )
 
 summary_table
 ```
 
-We next document missing values before applying the imputation procedure.
-
+```{=latex}
+\endgroup
+```
 ```{python}
-#| echo: false
-#| results: 'hide'
-
+#| output: false
 missing_table = (
     df[stock_chars + macro_vars]
     .isna()
@@ -121,8 +123,6 @@ missing_table = (
     .rename("n_missing")
     .to_frame()
 )
-
-missing_table
 ```
 
 Missing stock characteristics are imputed using the monthly cross-sectional median. This preserves the number of stock-month observations while using only contemporaneous information from the same month. The median is preferred to the mean because it is less sensitive to extreme firm-level observations, which are common in financial data.
@@ -142,8 +142,7 @@ df = df.dropna(subset=["ret_excess", "mktcap_lag"]).copy()
 ```
 
 ```{python}
-#| echo: false
-#| results: 'hide'
+#| output: false
 post_missing = (
     df[stock_chars + macro_vars + ["ret_excess", "mktcap_lag"]]
     .isna()
@@ -152,7 +151,6 @@ post_missing = (
     .to_frame()
 )
 
-post_missing
 ```
 
 We recode `sic2` into the 10 major SIC divisions to retain broad industry information while keeping the feature space manageable. This reduces the number of industry dummy variables and lowers the risk that sparse industry categories create noisy predictors in the machine learning models.
@@ -187,36 +185,11 @@ df["sic_division"] = df["sic2"].apply(recode_sic)
 ```
 
 ```{python}
-#| echo: false
 industry_counts = (
     df["sic_division"]
     .value_counts()
     .rename_axis("sic_division")
     .reset_index(name="n_obs")
-)
-
-industry_counts
-```
-
-Figure 1 plots the monthly cross-sectional mean excess return. The series illustrates that average realized excess returns vary substantially over time, highlighting the noisy nature of stock return prediction.
-
-```{python}
-monthly_mean_ret = (
-    df.groupby("date", as_index=False)["ret_excess"]
-    .mean()
-)
-
-(
-    ggplot(monthly_mean_ret, aes(x="date", y="ret_excess"))
-    + geom_line(size=0.4)
-    + geom_hline(yintercept=0, linetype="dashed")
-    + scale_y_continuous(labels=percent_format())
-    + labs(
-        title="Cross-sectional mean excess return over time",
-        x="",
-        y="Mean excess return"
-    )
-    + theme_minimal()
 )
 ```
 
@@ -269,8 +242,6 @@ Together, the two models provide a comparison between a regularized linear bench
 
 ### Exercise 2b: Time-respecting data split
 ```{python}
-#| echo: false
-
 # split by unique dates rather than raw rows
 unique_dates = sorted(meta["date"].unique())
 
@@ -321,7 +292,6 @@ split_summary = pd.DataFrame({
     "Months": [len(train_dates), len(val_dates), len(test_dates)],
     "Observations": [len(X_train), len(X_val), len(X_test)]
 })
-
 split_summary
 ```
 
@@ -335,10 +305,9 @@ Continuous predictors are standardized using the training sample only. The same 
 ### Exercise 2c: Hyperparameter tuning
 
 ```{python}
-#| echo: false
 #| cache: true
 
-# Elastic Net hyperparameter grid
+# elastic net hyperparameter grid
 en_param_grid = {
     "alpha": [0.001, 0.01, 0.1],
     "l1_ratio": [0.2, 0.5, 0.8],
@@ -370,15 +339,14 @@ en_results_df.round(6)
 ```
 
 ```{python}
-#| echo: false
 #| cache: true
 
 # random forest hyperparameter grid
 rf_param_grid = {
-    "n_estimators": [30],
+    "n_estimators": [100],
     "max_features": ["sqrt"],
-    "min_samples_leaf": [100],
-    "max_depth": [5, 10],
+    "min_samples_leaf": [50, 100, 200],
+    "max_depth": [3, 5, 8],
 }
 
 rf_results = []
@@ -408,7 +376,6 @@ rf_results_df.round(6)
 ```
 
 ```{python}
-#| echo: false
 #| cache: true
 
 # fit final elastic net model using selected hyperparameters
@@ -465,8 +432,7 @@ The final specification for each model is selected as the one with the lowest va
 
 ### Exercise 2d: Save models to disk
 ```{python}
-#| echo: false
-#| results: 'hide'
+#| output: false
 
 joblib.dump(final_en, "model_elastic_net.joblib")
 joblib.dump(final_rf, "model_random_forest.joblib")
@@ -483,12 +449,9 @@ final_rf = joblib.load("model_random_forest.joblib")
 The final fitted models are saved to disk using `joblib` to ensure reproducibility and facilitate peer review. Saving the trained models allows others to load the exact same fitted objects without re-running the full hyperparameter tuning procedure.
 
 ## Exercise 3
-### Exercise 3a: Generate predicted excess returns
-
+### Exercise 3a-c: Predictions and long-short portfolios
+Using the fitted Elastic Net and Random Forest models from Exercise 2, we generate predicted excess returns for each stock-month observation in the validation and test samples. The test set is only used for final out-of-sample evaluation and is not used for model fitting or hyperparameter selection.
 ```{python}
-#| echo: false
-#| results: 'hide'
-
 # generate predictions directly from fitted models
 pred_val_en = final_en.predict(X_val)
 pred_val_rf = final_rf.predict(X_val)
@@ -506,14 +469,9 @@ meta_test["pred_en"] = pred_test_en
 meta_test["pred_rf"] = pred_test_rf
 ```
 
-Using the fitted models, we generate predicted excess returns for each stock-month observation in the validation and test samples. These predictions reflect expected returns based on firm characteristics, macroeconomic variables, and their interactions.
-The predictions are used to rank stocks in portfolio construction, where higher predicted returns correspond to higher deciles and more attractive investment opportunities.
+For each month, stocks are sorted into decile portfolios based on predicted excess returns. Decile 0 contains the lowest predicted returns and decile 9 contains the highest predicted returns. Realized excess returns within each decile are computed as value-weighted averages using `mktcap_lag`.
 
-### Exercise 3b: Decile portfolio sorts
 ```{python}
-#| echo: false
-#| results: 'hide'
-
 def assign_deciles(df, pred_col, decile_col):
     """
     Assign stocks to decile portfolios each month based on predicted returns.
@@ -540,17 +498,10 @@ meta_test = assign_deciles(meta_test, "pred_en", "decile_en")
 meta_test = assign_deciles(meta_test, "pred_rf", "decile_rf")
 ```
 
-Stocks are sorted into decile portfolios each month based on predicted excess returns. Within each month, stocks are ranked and divided into ten groups of approximately equal size, from the lowest (decile 0) to the highest (decile 9).
+The long-short strategy buys the top predicted-return decile and shorts the bottom predicted-return decile. The monthly long-short return is therefore the value-weighted return of decile 9 minus the value-weighted return of decile 0.
 
-To ensure stable portfolio formation, predictions are ranked before applying quantile sorting, avoiding issues with tied values. Months with very few observations are excluded.
-
-This procedure generates a cross-sectional ranking that reflects the model’s expected return signal and is used to construct long-short portfolios.
-
-
-### Exercise 3c: Long-short portfolio
 ```{python}
-#| echo: false
-#| results: 'hide'
+#| output: false
 
 def compute_longshort(df, decile_col):
     """
@@ -603,13 +554,13 @@ ls_test_rf = compute_longshort(meta_test, "decile_rf")
 
 ### Exercise 3d: Performance metrics
 The market benchmark is constructed as the value-weighted average excess return across all stocks in the relevant sample. This makes the benchmark comparable to the long-short portfolio, since both returns are measured in excess of the risk-free rate. CAPM alpha is estimated by regressing the long-short portfolio excess return on the value-weighted market excess return.
-```{python}
-#| echo: false
-#| results: 'hide'
 
+@tbl-performance reports annualized mean excess returns, Sharpe ratios, CAPM alphas, and alpha t-statistics for the long-short portfolios and the market benchmark. Elastic Net performs consistently across validation and test, with positive annualized returns and Sharpe ratios in both periods. Random Forest performs reasonably in validation but delivers negative test-period performance, suggesting that its predictive signal is less stable out-of-sample. The alpha t-statistics are below conventional significance levels, so the evidence for statistically significant abnormal returns is weak.
+
+```{python}
 def portfolio_stats(ls_returns, market_returns=None):
     r = ls_returns["ls_ret"]
-    ann_mean   = r.mean() * 12
+    ann_mean = r.mean() * 12
     ann_sharpe = r.mean() / r.std() * np.sqrt(12)
 
     if market_returns is not None:
@@ -617,7 +568,7 @@ def portfolio_stats(ls_returns, market_returns=None):
         aligned.columns = ["ls_ret", "mkt_excess_ret"]
         X_capm = sm.add_constant(aligned["mkt_excess_ret"])
         res = sm.OLS(aligned["ls_ret"], X_capm).fit()
-        alpha   = res.params["const"] * 12
+        alpha = res.params["const"] * 12
         alpha_t = res.tvalues["const"]
     else:
         alpha, alpha_t = np.nan, np.nan
@@ -629,7 +580,15 @@ def portfolio_stats(ls_returns, market_returns=None):
         "alpha_t": alpha_t
     }
 
-# market excess returns
+def market_stats(market_returns):
+    r = market_returns.dropna()
+    return {
+        "ann_mean": r.mean() * 12,
+        "sharpe": r.mean() / r.std() * np.sqrt(12),
+        "alpha": np.nan,
+        "alpha_t": np.nan
+    }
+
 mkt_val = meta_val.groupby("date").apply(
     lambda g: np.average(g["ret_excess"], weights=g["mktcap_lag"])
 ).rename("mkt_excess_ret")
@@ -638,27 +597,27 @@ mkt_test = meta_test.groupby("date").apply(
     lambda g: np.average(g["ret_excess"], weights=g["mktcap_lag"])
 ).rename("mkt_excess_ret")
 
-# collect results
 results_3d = [
     {"Model": "Elastic Net", "Sample": "Validation", **portfolio_stats(ls_val_en, mkt_val)},
     {"Model": "Random Forest", "Sample": "Validation", **portfolio_stats(ls_val_rf, mkt_val)},
+    {"Model": "Market", "Sample": "Validation", **market_stats(mkt_val)},
     {"Model": "Elastic Net", "Sample": "Test", **portfolio_stats(ls_test_en, mkt_test)},
     {"Model": "Random Forest", "Sample": "Test", **portfolio_stats(ls_test_rf, mkt_test)},
+    {"Model": "Market", "Sample": "Test", **market_stats(mkt_test)},
 ]
 
 results_3d_df = pd.DataFrame(results_3d)
 ```
 
 ```{python}
-#| echo: false
+#| label: tbl-performance
+#| tbl-cap: "Annualized long-short portfolio performance and market benchmark"
 results_3d_df.round(4)
 ```
 
 ### Exercise 3e: Portfolio turnover
+@tbl-turnover reports average monthly turnover.
 ```{python}
-#| echo: false
-#| results: 'hide'
-
 def compute_turnover(df, decile_col):
     """
     Monthly turnover: average fraction of long/short legs that changes each month.
@@ -694,49 +653,35 @@ turnover_df = pd.DataFrame({
 ```
 
 ```{python}
-#| echo: false
+#| label: tbl-turnover
+#| tbl-cap: "Average monthly portfolio turnover"
 
 turnover_df.round(3)
 ```
 
 ### Exercise 3f: Model comparison
 ```{python}
-#| echo: false
-#| fig-width: 8
-#| fig-height: 4
+en_test = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Test'").iloc[0]
+rf_test = results_3d_df.query("Model == 'Random Forest' and Sample == 'Test'").iloc[0]
 
-fig_data = pd.DataFrame({
-    "Elastic Net validation":  (1 + ls_val_en["ls_ret"]).cumprod(),
-    "Random Forest validation":  (1 + ls_val_rf["ls_ret"]).cumprod(),
-    "Elastic Net test": (1 + ls_test_en["ls_ret"]).cumprod(),
-    "Random Forest test": (1 + ls_test_rf["ls_ret"]).cumprod(),
-}).reset_index().melt(
-    id_vars="date",
-    var_name="Model",
-    value_name="cumulative_return"
-)
+en_val = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Validation'").iloc[0]
+rf_val = results_3d_df.query("Model == 'Random Forest' and Sample == 'Validation'").iloc[0]
 
-(
-    ggplot(fig_data, aes(x="date", y="cumulative_return", color="Model"))
-    + geom_line(size=0.7)
-    + labs(
-        title="Cumulative Long-Short Portfolio Returns",
-        x="",
-        y="Cumulative return",
-        caption="Value-weighted long-short portfolio: top decile minus bottom decile."
-    )
-    + theme_minimal()
-)
+en_turnover = turnover_df.query("Model == 'Elastic Net'").iloc[0]
+rf_turnover = turnover_df.query("Model == 'Random Forest'").iloc[0]
 ```
 
-Both models are compared across Sharpe ratio, CAPM alpha, and portfolio turnover. Elastic Net is the regularized linear benchmark and tends to produce smoother predictions because it imposes a linear structure and coefficient shrinkage. Random Forest is more flexible and can capture nonlinearities and interactions between predictors, but this flexibility may also lead to higher portfolio turnover if the ranking of stocks changes more frequently over time. From an investor's perspective, the preferred model is the one that delivers stronger risk-adjusted performance and alpha without requiring excessive turnover.
+### Exercise 3f: Model comparison
+For the selected hyperparameter specifications, Elastic Net is the preferred model from an investor perspective. In the test period, Elastic Net generates an annualized mean return of `{python} f"{en_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{en_test['sharpe']:.2f}"`, and a CAPM alpha of `{python} f"{en_test['alpha']*100:.2f}"`%. Random Forest performs poorly out-of-sample, with an annualized mean return of `{python} f"{rf_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{rf_test['sharpe']:.2f}"`, and a CAPM alpha of `{python} f"{rf_test['alpha']*100:.2f}"`%.
+
+@tbl-turnover shows that Elastic Net also has substantially lower turnover. In the test period, Elastic Net turnover is `{python} f"{en_turnover['Test']:.3f}"`, compared with `{python} f"{rf_turnover['Test']:.3f}"` for Random Forest. This matters because high turnover increases transaction costs and can erode gross portfolio returns. Overall, Elastic Net provides the better trade-off between risk-adjusted performance, alpha, and implementability.
+
 
 ## Exercise 4
 
 ### Exercise 4a: Variable importance
 
 ```{python}
-#| echo: false
 #| cache: true
 
 # baseline test Sharpe ratios from Exercise 3
@@ -827,7 +772,6 @@ This portfolio-based importance measure evaluates whether a predictor matters fo
 
 ### Exercise 4b: Ranking comparison
 ```{python}
-#| echo: false
 
 rank_compare = (
     vi_en.rename(columns={"sharpe_drop": "sharpe_drop_en"})
