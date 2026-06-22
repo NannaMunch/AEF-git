@@ -221,9 +221,6 @@ The dataset is split chronologically to avoid look-ahead bias. Training observat
 The remaining 80% of months is split into training and validation samples, yielding an approximate 60/20/20 split. The training set is used to estimate model parameters, while the validation set is used for hyperparameter tuning. The split is performed by month rather than by individual rows to preserve the panel structure.
 
 ```{python}
-#| label: tbl-split
-#| tbl-cap: "Time-respecting train/validation/test split with date ranges and sizes."
-
 # split by unique dates rather than raw rows
 unique_dates = sorted(meta["date"].unique())
 
@@ -275,7 +272,13 @@ split_summary = pd.DataFrame({
     "Observations": [len(X_train), len(X_val), len(X_test)]
 })
 
-split_summary.style.hide(axis="index")
+```
+
+```{python}
+#| label: tbl-split
+#| tbl-cap: "Time-respecting train/validation/test split with date ranges and sizes"
+#| results: asis
+split_summary
 ```
 
 Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.
@@ -629,13 +632,11 @@ turnover_df = pd.DataFrame({
 #| label: tbl-turnover
 #| tbl-cap: "Average monthly portfolio turnover"
 
-turnover_df.round(3).style.hide(axis="index")
+turnover_df.round(4).style.hide(axis="index")
 ```
 
 ### Exercise 3f: Model comparison
 ```{python}
-#| output: false
-
 en_test = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Test'").iloc[0]
 rf_test = results_3d_df.query("Model == 'Random Forest' and Sample == 'Test'").iloc[0]
 
@@ -745,7 +746,12 @@ top3_rf["model"] = "Random Forest"
 top3_importance = pd.concat([top3_en, top3_rf], ignore_index=True)
 top3_importance = top3_importance[["model", "feature", "sharpe_drop"]]
 
-top3_importance.round(4)
+```
+
+```{python}
+#| label: tbl-variable-importance
+#| tbl-cap: "Top predictors by Sharpe-ratio drop in the test sample"
+top3_importance.round(4).style.hide(axis="index")
 ```
 
 This portfolio-based importance measure evaluates whether a predictor matters for the final investment strategy rather than only for return prediction accuracy. A larger Sharpe-ratio drop indicates that removing the information in that predictor reduces the economic value of the model.
@@ -753,26 +759,6 @@ This portfolio-based importance measure evaluates whether a predictor matters fo
 
 ### Exercise 4b: Ranking comparison
 The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.
-```{python}
-
-rank_compare = (
-    vi_en.rename(columns={"sharpe_drop": "sharpe_drop_en"})
-    .merge(
-        vi_rf.rename(columns={"sharpe_drop": "sharpe_drop_rf"}),
-        on="feature",
-        how="outer"
-    )
-)
-
-rank_compare["rank_en"] = rank_compare["sharpe_drop_en"].rank(ascending=False, method="min")
-rank_compare["rank_rf"] = rank_compare["sharpe_drop_rf"].rank(ascending=False, method="min")
-rank_compare["rank_gap"] = (rank_compare["rank_en"] - rank_compare["rank_rf"]).abs()
-
-rank_compare[["feature", "rank_en", "rank_rf", "rank_gap"]].sort_values(
-    "rank_gap",
-    ascending=False
-).head(5).round(1)
-```
 
 
 ### Exercise 4c: Findings to financial theory
