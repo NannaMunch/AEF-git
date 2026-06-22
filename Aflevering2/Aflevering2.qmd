@@ -58,7 +58,7 @@ For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.20
 
 ```{python}
 #| cache: false
-df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
+df = pd.read_parquet("/Users/esmeraldalarsson/Desktop/stock_characteristics_monthly.parquet")
 
 # keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
