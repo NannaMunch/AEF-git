@@ -92,8 +92,6 @@ base_cols = ["permno", "date", "ret_excess", "mktcap_lag", "sic2"]
 df = df[base_cols + stock_chars + macro_vars].copy()
 ```
 
-The dataset already aligns predictors at month $t$ with next-month excess returns, so we do not lead or lag any variables.
-
 ### 1b: Summary Statistics and Missing Values
 @tbl-summary-statistics reports summary statistics for the selected predictors. 
 ```{=latex}
@@ -782,7 +780,7 @@ The Random Forest importance results suggest that portfolio performance is mainl
 
 The other top predictors, `characteristic_retvol_x_macro_tbl` and `characteristic_mvel1_x_` `macro_dfy`, suggest that volatility and size effects depend on interest rate conditions and credit risk. In contrast, Elastic Net produces near-zero importance scores, consistent with its strongly regularized linear structure. Overall, the results indicate that the Random Forest model extracts economic value primarily from nonlinear and macro-dependent interactions.
 
-
+## For Assignment 3
 ```{python}
 ma2_elastic_net_bundle = {
     "model": final_en,
