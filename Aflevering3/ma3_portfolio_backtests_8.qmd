@@ -346,6 +346,7 @@ def compute_turnover(w_new, w_prev, ret):
 strategies  = ["naive", "tc_mv", "tc_mv_lw", "mv_noshort"]
 results     = {s: {"ret": [], "turnover": [], "dates": []} for s in strategies}
 w_prev = {s: None for s in strategies}
+ml_months, ml_cov = 0, []                                  # <-- test
 
 for t_idx, date in enumerate(oos_dates):
     oos_ret = ret_panel.loc[date]
@@ -381,7 +382,10 @@ for t_idx, date in enumerate(oos_dates):
 
     ml_mu = get_ml_predicted_returns(date, permnos_w)
     if ml_mu is not None:
-        mu_vec = ml_mu.reindex(permnos_w).fillna(ml_mu.mean()).values
+        aligned = ml_mu.reindex(permnos_w)                 # <-- test
+        ml_months += 1                                     # <-- test
+        ml_cov.append(aligned.notna().mean())              # <-- test
+        mu_vec = aligned.fillna(ml_mu.mean()).values
     else:
         mu_series = excess_w_filled.mean(axis=0)
         lo, hi = mu_series.quantile(0.01), mu_series.quantile(0.99)
@@ -431,6 +435,12 @@ for t_idx, date in enumerate(oos_dates):
         results[strat]["turnover"].append(to)
         results[strat]["dates"].append(date)
         w_prev[strat] = (w_new, permnos_w)
+
+if ml_months:                                              # <-- test (fjern før aflevering)
+    print(f"ML predictions used in {ml_months}/{len(oos_dates)} months; "
+          f"avg cross-sectional coverage {np.mean(ml_cov)*100:.0f}%")
+else:
+    print("WARNING: ML predictions never used — fell back to historical mean every month")
 ```
 
 ```{python}
