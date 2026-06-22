@@ -765,7 +765,7 @@ sample_sizes_ex7 = [60, 120, 240, 500]
 
 results_ex7 = pd.concat(
     [
-        simulate_strategy_performance(T, mu, Sigma, n_simulations=200)
+        simulate_strategy_performance(T, mu, Sigma, n_simulations=500)
         for T in sample_sizes_ex7
     ],
     ignore_index=True
@@ -886,3 +886,4 @@ The right part of the figure displays the estimation-sensitive strategies, namel
 Overall, the results suggest that the equally weighted and inverse-volatility portfolios are the most robust to estimation error, while the plug-in tangency portfolio is the most sensitive. Although optimization-based strategies are theoretically attractive, their performance can deteriorate considerably when the inputs are estimated with noise.
 
 A practical lesson for investors is therefore that simpler portfolio rules may outperform highly optimized portfolios in realistic settings where parameters must be estimated from limited historical data. The analysis highlights that reducing estimation risk can be just as important as achieving theoretical optimality, especially when sample sizes are small.
+
