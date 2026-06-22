@@ -23,7 +23,7 @@
         "  fig-height: 3\n",
         "---"
       ],
-      "id": "0637dfb7"
+      "id": "47d5a570"
     },
     {
       "cell_type": "code",
@@ -48,7 +48,7 @@
         "    \"font.size\": 10,\n",
         "})"
       ],
-      "id": "b052a0b2",
+      "id": "9de08af1",
       "execution_count": null,
       "outputs": []
     },
@@ -62,7 +62,7 @@
         "\n",
         "Following the assignment, we apply two liquidity screens to every month of data, starting from January 1980: a stock must trade above \\$2 per share, and its market capitalisation must exceed the 20th percentile of NYSE-listed stocks in that month. The second screen is the standard size filter used throughout the empirical asset-pricing literature (Fama and French, 1993): the breakpoint is computed using only NYSE-listed stocks, but the filter is then applied to the entire universe, including Nasdaq- and AMEX-listed names, which tend to be smaller on average. This avoids the universe being dominated by illiquid micro-caps that are difficult to trade in practice and whose return data is noisier."
       ],
-      "id": "14e04924"
+      "id": "165197b0"
     },
     {
       "cell_type": "code",
@@ -90,7 +90,7 @@
         "mask = (df[\"prc\"] > 2) & (df[\"mktcap\"] >= df[\"nyse_p20\"]) & df[\"ret\"].notna()\n",
         "df_filtered = df[mask].copy()"
       ],
-      "id": "38fe6ab8",
+      "id": "7a711844",
       "execution_count": null,
       "outputs": []
     },
@@ -112,7 +112,7 @@
         "n_per_month = df_filtered.groupby(\"date\")[\"permno\"].count()\n",
         "avg_n = n_per_month.mean()"
       ],
-      "id": "bc72d5d4",
+      "id": "6a9cc459",
       "execution_count": null,
       "outputs": []
     },
@@ -122,7 +122,7 @@
       "source": [
         "Because the resulting universe still contains well over a thousand stocks per month in some years, and because the portfolio optimisation below requires inverting an $N \\times N$ covariance matrix at every rebalancing date — an operation that scales cubically in $N$ — we draw a single, fixed random subsample of `{python} f\"{MAX_UNIVERSE_SIZE}\"` stocks from the filtered universe and use this reduced panel throughout the remainder of the assignment. The subsample is fixed across the entire sample period using a fixed random seed, so the same set of stocks (where available) is followed through time. This mirrors the portfolio bootstrap of Hautsch and Voigt (2019), who similarly restrict their full panel of 308 S&P 500 constituents to subsamples of 250 stocks for tractability when repeatedly re-estimating high-dimensional covariance matrices."
       ],
-      "id": "e4a2d3b5"
+      "id": "76d1b777"
     },
     {
       "cell_type": "code",
@@ -139,7 +139,7 @@
         "plt.savefig(\"fig_universe_size.pdf\", bbox_inches=\"tight\")\n",
         "plt.show()"
       ],
-      "id": "389cb6b0",
+      "id": "ab42a730",
       "execution_count": null,
       "outputs": []
     },
@@ -210,7 +210,7 @@
         "\n",
         "For Exercise 5d, we additionally implement a short-sale-constrained variant, `compute_weights_no_short`, since the closed-form solution above has no mechanism for enforcing $\\omega \\geq 0$. Once a non-negativity constraint is added, the optimisation problem remains a convex quadratic program but no longer admits a closed-form solution, so we solve it numerically using sequential least-squares quadratic programming (SLSQP) via `scipy.optimize.minimize`. The previous-holding term in the objective is linear in $\\omega$ once expanded, so it can be absorbed into an \"effective\" expected-return vector, which keeps the resulting quadratic program in standard form."
       ],
-      "id": "3b7bb025"
+      "id": "d725eb1c"
     },
     {
       "cell_type": "code",
@@ -259,7 +259,7 @@
         "w_prev_test = np.ones(N_test) / N_test\n",
         "w_test = compute_weights(mu_test, S_test, GAMMA, 0.1, w_prev_test)"
       ],
-      "id": "31508b8e",
+      "id": "be4e3c47",
       "execution_count": null,
       "outputs": []
     },
@@ -279,7 +279,7 @@
         "\n",
         "The regularisation we apply is therefore not a small ridge addition but a direct flooring of the matrix's eigenvalues: we compute the eigendecomposition of the raw sample covariance, replace any eigenvalue below 10% of the largest eigenvalue with that floor value, and reconstruct the matrix from the adjusted eigenvalues. This guarantees a condition number no worse than ten by construction, regardless of how rank-deficient the raw matrix was. This is the standard textbook treatment of high-dimensional covariance estimation when $N$ approaches or exceeds $T$; the Ledoit-Wolf estimator achieves a closely related effect indirectly, by shrinking towards a well-conditioned target matrix, which is one reason the two estimators are compared directly in Exercise 5 below."
       ],
-      "id": "148275eb"
+      "id": "b2102c30"
     },
     {
       "cell_type": "code",
@@ -294,7 +294,7 @@
         "    Sigma_reg = eigvec @ np.diag(eigval_floored) @ eigvec.T\n",
         "    return (Sigma_reg + Sigma_reg.T) / 2"
       ],
-      "id": "e7e59d60",
+      "id": "730337a9",
       "execution_count": null,
       "outputs": []
     },
@@ -310,7 +310,7 @@
         "\n",
         "We verified that this — rather than any remaining covariance-conditioning issue — is the dominant source of instability in an earlier draft of this analysis, again using a controlled simulation. With $N=120$ assets, $T=36$ months, a known and constant true mean of zero, and an already well-conditioned covariance matrix (using the eigenvalue-floor fix from Exercise 3), the *unmodified* historical-mean estimator alone produces an average simulated monthly turnover of over 1,400%. Shrinking the estimated mean towards zero by a factor of 0.05 — that is, using only 5% of the raw historical-mean estimate — reduces this to approximately 105% per month, a much more economically plausible figure, while leaving the covariance matrix and all other inputs unchanged. This is conceptually the same idea as the Bayes-Stein shrinkage estimator of Jorion (1986), cited in the assignment's reference list, which similarly shrinks the sample mean towards a more stable target to counteract estimation noise. We apply this shrinkage in the simplified form of a single fixed intensity parameter, `MU_SHRINK = 0.05`, motivated entirely by this diagnostic exercise. Note that this shrinkage applies only to the historical-mean fallback; once genuine MA2 return predictions are substituted in, this parameter becomes irrelevant, since machine-learning forecasts are presumably better-behaved and need not be shrunk in this ad hoc way."
       ],
-      "id": "65ed3970"
+      "id": "ea85b4cb"
     },
     {
       "cell_type": "code",
@@ -383,7 +383,7 @@
         "    `date`, or None if the month is not covered (-> historical-mean fallback).\"\"\"\n",
         "    return mu_by_month.get(pd.Timestamp(date).to_period(\"M\"))"
       ],
-      "id": "f2fd07fa",
+      "id": "b44901f4",
       "execution_count": null,
       "outputs": []
     },
@@ -402,7 +402,7 @@
         "\n",
         "Realised portfolio returns are computed each month as the dot product of the chosen weights with that month's actual stock returns. Following Hautsch and Voigt (2019, eq. 45–46), monthly turnover is computed as the $L_1$ distance between the newly chosen weights and the previous month's weights after they have drifted with realised returns (so that turnover reflects genuine rebalancing rather than passive drift). We report all performance statistics net of a flat proportional transaction cost of 50 basis points per unit of turnover, consistent with the empirical convention used by Hautsch and Voigt and by DeMiguel, Garlappi and Uppal (2009)."
       ],
-      "id": "6aa22c48"
+      "id": "d2e450f9"
     },
     {
       "cell_type": "code",
@@ -420,7 +420,7 @@
         "                .sort_index())\n",
         "oos_dates = ret_panel.loc[OOS_START:OOS_END].index"
       ],
-      "id": "9a1bcb46",
+      "id": "c81547c6",
       "execution_count": null,
       "outputs": []
     },
@@ -436,7 +436,7 @@
         "    w_drifted = gross / denom\n",
         "    return np.sum(np.abs(w_new - w_drifted))"
       ],
-      "id": "2dff6f3d",
+      "id": "b345b247",
       "execution_count": null,
       "outputs": []
     },
@@ -543,7 +543,7 @@
         "else:\n",
         "    print(\"WARNING: ML predictions never used — fell back to historical mean every month\")"
       ],
-      "id": "f776225f",
+      "id": "e19cc40e",
       "execution_count": null,
       "outputs": []
     },
@@ -592,7 +592,7 @@
         "    })\n",
         "summary_table = pd.DataFrame(rows).set_index(\"Strategy\")"
       ],
-      "id": "d6c49785",
+      "id": "520e1ebf",
       "execution_count": null,
       "outputs": []
     },
@@ -602,7 +602,7 @@
       "source": [
         "Table 1 reports the resulting annualised, net-of-transaction-cost Sharpe ratios, mean excess returns, and average monthly turnover for all four strategies over the full out-of-sample period."
       ],
-      "id": "b6215038"
+      "id": "5eaacfbe"
     },
     {
       "cell_type": "code",
@@ -611,7 +611,7 @@
         "from IPython.display import display\n",
         "display(summary_table)"
       ],
-      "id": "2cc06ac1",
+      "id": "5e85d6ad",
       "execution_count": null,
       "outputs": []
     },
@@ -634,7 +634,7 @@
         "plt.savefig(\"fig_cumulative_returns.pdf\", bbox_inches=\"tight\")\n",
         "plt.show()"
       ],
-      "id": "6d1c47e4",
+      "id": "5bba80d2",
       "execution_count": null,
       "outputs": []
     },
@@ -644,7 +644,7 @@
       "source": [
         "Figure 2 plots cumulative net-of-cost wealth for each strategy. The naive 1/N portfolio performs strongly over this period, consistent with the well-documented difficulty of beating equal weighting out-of-sample (DeMiguel, Garlappi and Uppal, 2009), particularly once estimation risk in both $\\hat\\mu_t$ and $\\hat\\Sigma_t$ is taken into account. The transaction-cost-adjusted strategies based on the sample covariance and on the short-sale-constrained Ledoit-Wolf variant track each other closely and trail the naive portfolio somewhat, while the unconstrained Ledoit-Wolf strategy underperforms more substantially, particularly after 2020."
       ],
-      "id": "2dc0cfa9"
+      "id": "6038ef6e"
     },
     {
       "cell_type": "code",
@@ -662,7 +662,7 @@
         "plt.savefig(\"fig_turnover.pdf\", bbox_inches=\"tight\")\n",
         "plt.show()"
       ],
-      "id": "10ab4770",
+      "id": "9cd62a2a",
       "execution_count": null,
       "outputs": []
     },
@@ -672,7 +672,7 @@
       "source": [
         "Figure 3 shows the corresponding monthly turnover series. The naive portfolio has, by construction, very low turnover, since it only needs to correct for the previous month's drift away from equal weighting. The three optimised strategies show substantially higher and more time-varying turnover, with occasional spikes coinciding with periods of market stress (for example around 2012, 2016, and 2020) when the estimated optimal allocation changes more abruptly. The Ledoit-Wolf-based unconstrained strategy exhibits the highest average turnover of the three, which — combined with its weaker net return performance in Figure 2 — suggests that its shrinkage target alone is not sufficient to prevent the expected-return signal from inducing excessive rebalancing once transaction costs are deducted."
       ],
-      "id": "9adb7a3e"
+      "id": "46e74e90"
     },
     {
       "cell_type": "code",
@@ -703,7 +703,7 @@
         "diff_l1 = np.abs(w_gmv_s - w_gmv_lw).sum()\n",
         "diff_l2 = np.linalg.norm(w_gmv_s - w_gmv_lw)"
       ],
-      "id": "1abc8f9a",
+      "id": "65cdd379",
       "execution_count": null,
       "outputs": []
     },
@@ -713,7 +713,7 @@
       "source": [
         "**3b.** To compare the sample and Ledoit-Wolf covariance estimators more directly, we compute the global minimum-variance portfolio implied by each, using the most recent out-of-sample rolling window (`{python} f\"N={N_comp}\"` stocks). The two resulting weight vectors differ by an $L_1$ distance of `{python} f\"{diff_l1:.2f}\"` and an $L_2$ distance of `{python} f\"{diff_l2:.3f}\"`; the Ledoit-Wolf shrinkage intensity selected automatically for this window is `{python} f\"{lw_c.shrinkage_:.2f}\"`."
       ],
-      "id": "d206f1da"
+      "id": "9139a19c"
     },
     {
       "cell_type": "code",
@@ -735,7 +735,7 @@
         "plt.savefig(\"fig_cov_comparison.pdf\", bbox_inches=\"tight\")\n",
         "plt.show()"
       ],
-      "id": "0d2377a3",
+      "id": "ef31ec76",
       "execution_count": null,
       "outputs": []
     },
@@ -759,7 +759,7 @@
         "\n",
         "Example: \"The guest lecture highlighted how [key topic] is applied in practice at [institution]. A key takeaway was [insight 1]. This connects to our assignment because [connection to TC/portfolio construction].\""
       ],
-      "id": "720524d7"
+      "id": "5c23ded4"
     }
   ],
   "metadata": {
