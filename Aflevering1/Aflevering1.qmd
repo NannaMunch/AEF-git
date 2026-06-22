@@ -667,23 +667,18 @@ mean_line = (
 
 @tbl-plugin-performance and @fig-plugin-performance show the out-of-sample performance of the plug-in tangency portfolio. The blue dashed line marks the Sharpe ratio of the true tangency portfolio, while the red dashed line marks the average plug-in Sharpe ratio for each sample size. The histograms show the distribution of plug-in Sharpe ratios across simulations. When \(T\) is small, the plug-in Sharpe ratios are dispersed and lie far below the true optimum. As \(T\) increases, the distribution shifts closer to the true Sharpe ratio, showing that performance improves when the sample moments are estimated more precisely.
 
-## Exercise 7
-In Exercise 6, we focused exclusively on the plug-in tangency portfolio and examined how estimation error affects its out-of-sample performance. The results showed that performance improves as the sample size increases and the estimated moments become more precise.
+## Exercise 7 
+In Exercise 6, we focused on the plug-in tangency portfolio and examined how estimation error affects its out-of-sample performance. We now extend the analysis by comparing the plug-in tangency portfolio with alternative portfolio construction methods. Using the simulation framework from Exercise 5, returns are generated from the true parameters $\mu$ and $\Sigma$. Portfolio weights are then constructed from the simulated samples and evaluated out-of-sample using the true parameters. This allows us to assess which strategies are most robust to estimation error.
 
-We now extend the analysis by comparing the plug-in tangency portfolio with other alternative portfolio construction methods. Using the same simulation framework as in Exercise 5, each strategy is evaluated out-of-sample using the true parameters of the data-generating process. This allows us to assess which strategies are most robust to estimation error and whether simpler portfolio rules can outperform the plug-in tangency portfolio when parameters must be estimated from limited samples.
-
-
-To study the robustness of different portfolio construction methods, we compare the plug-in tangency portfolio with other alternative strategies.
-
-The first benchmark is the equally weighted portfolio, defined as
+The benchmark strategy is the equally weighted portfolio, defined as
 
 $$
 w_{EW} = \frac{1}{N}\iota.
 $$
 
-This portfolio assigns equal weights to all assets and does not depend on estimated parameters.
+This portfolio assigns equal weights to all assets and does not depend on estimated parameters. The economic intuition is that diversification can be achieved without attempting to identify the best assets.
 
-The second strategy is the global minimum variance portfolio, which minimizes portfolio variance subject to the weights summing to one. The weights are given by
+The first alternative strategy is the global minimum variance portfolio, which minimizes portfolio variance subject to the weights summing to one. The weights are given by
 
 $$
 w_{GMV} = \frac{\Sigma^{-1}\iota}{\iota^{\top}\Sigma^{-1}\iota}.
@@ -691,14 +686,16 @@ $$
 
 This strategy depends only on the covariance matrix and does not require estimates of expected returns.
 
-The third strategy is the inverse-volatility portfolio, where assets with higher volatility receive lower weights. The weights are defined as
+The second alternative strategy is the inverse-volatility portfolio, where assets with higher volatility receive lower weights. The weights are defined as
 
 $$
 w_i = \frac{1/\sigma_i}{\sum_{j=1}^{N} 1/\sigma_j}.
 $$
 
+This strategy is simple and only relies on the individual asset volatilities.
 
-```{python}
+The plug-in tangency portfolio from Exercise 6 is included as a reference strategy. It uses both $\hat{\mu}$ and $\hat{\Sigma}$, and is therefore expected to be more sensitive to estimation error.
+
 ```{python}
 #| label: ex7-strategies
 #| cache: true
@@ -741,9 +738,9 @@ def simulate_strategy_performance(T, mu_true, Sigma_true, n_simulations=200):
 
         strategy_weights = {
             "Equally weighted": equal_weight_portfolio(n_assets),
-            "Plug-in tangency": compute_tangency_portfolio(mu_hat, Sigma_hat)["weights"],
             "Global minimum variance": compute_global_minimum_variance_portfolio(Sigma_hat),
-            "Inverse volatility": inverse_volatility_portfolio(Sigma_hat)
+            "Inverse volatility": inverse_volatility_portfolio(Sigma_hat),
+            "Plug-in tangency": compute_tangency_portfolio(mu_hat, Sigma_hat)["weights"]
         }
 
         for strategy, weights in strategy_weights.items():
@@ -784,6 +781,16 @@ summary_ex7 = (
         std_sharpe=("sharpe", "std")
     )
 )
+
+true_tangency = compute_tangency_portfolio(mu, Sigma)
+
+true_performance = evaluate_portfolio(
+    true_tangency["weights"],
+    mu,
+    Sigma
+)
+
+true_sharpe_ex7 = true_performance["sharpe"]
 ```
 
 ```{python}
@@ -794,30 +801,88 @@ summary_ex7 = (
 table_ex7 = (
     summary_ex7
     .pivot(index="T", columns="strategy", values="mean_sharpe")
-    .round(4)
 )
 
-table_ex7
+table_ex7.loc["True optimum"] = true_sharpe_ex7
+
+table_ex7.round(4)
 ```
 
 ```{python}
 #| label: fig-strategy-comparison
 #| fig-pos: H
-#| fig-cap: Average out-of-sample Sharpe ratio across portfolio strategies.
+#| fig-cap: Out-of-sample Sharpe ratios across portfolio strategies.
+
+from mizani.formatters import label_number
+
+sensitive_strategies = summary_ex7[
+    summary_ex7["strategy"].isin([
+        "Plug-in tangency",
+        "Global minimum variance"
+    ])
+].copy()
+
+sensitive_strategies["group"] = "Estimation-sensitive"
+
+robust_strategies = summary_ex7[
+    summary_ex7["strategy"].isin([
+        "Equally weighted",
+        "Inverse volatility"
+    ])
+].copy()
+
+robust_strategies["group"] = "Estimation-robust"
+
+true_line_ex7 = pd.DataFrame({
+    "T": sample_sizes_ex7 * 2,
+    "mean_sharpe": [true_sharpe_ex7] * (2 * len(sample_sizes_ex7)),
+    "strategy": ["True optimum"] * (2 * len(sample_sizes_ex7)),
+    "group": (
+        ["Estimation-sensitive"] * len(sample_sizes_ex7) +
+        ["Estimation-robust"] * len(sample_sizes_ex7)
+    )
+})
+
+plot_ex7 = pd.concat(
+    [sensitive_strategies, robust_strategies, true_line_ex7],
+    ignore_index=True
+)
 
 (
-    ggplot(summary_ex7, aes(x="T", y="mean_sharpe", linetype="strategy")) +
-    geom_line() +
-    geom_point() +
+    ggplot(
+        plot_ex7,
+        aes(
+            x="T",
+            y="mean_sharpe",
+            color="strategy",
+            group="strategy"
+        )
+    ) +
+    geom_line(size=1.1) +
+    geom_point(size=2.5) +
+    facet_wrap("~group", nrow=1, scales="free_y") +
+    scale_y_continuous(labels=label_number(accuracy=0.001)) +
     labs(
         x="Sample size T",
         y="Average out-of-sample Sharpe ratio",
-        linetype=""
+        color=""
     ) +
-    theme_bw()
+    theme_bw() +
+    theme(
+        legend_position="bottom",
+        strip_background=element_blank(),
+        panel_border=element_blank(),
+        figure_size=(10, 4)
+    )
 )
 ```
 
-@fig-strategy-comparison compares the average Sharpe ratios of the different strategies across sample sizes.
+@tbl-strategy-performance and @fig-strategy-comparison compare the average out-of-sample Sharpe ratios across portfolio strategies and sample sizes. The true optimum is included as a benchmark representing the highest Sharpe ratio attainable when the true parameters are known.
 
-The results show that the plug-in tangency portfolio is the most sensitive to estimation error. In contrast, the equally weighted and inverse-volatility portfolios perform more consistently across different sample sizes because they rely less on estimated parameters. As the sample size increases, the performance of the plug-in tangency portfolio improves and gradually approaches the true optimum.
+The left part of the figure displays the estimation-robust strategies, namely the equally weighted portfolio and the inverse-volatility portfolio. Both strategies achieve Sharpe ratios that are very close to the true optimum and remain almost unchanged as the sample size increases. This indicates that their performance is largely unaffected by estimation error because they rely little or not at all on estimated parameters.
+
+The right part of the figure displays the estimation-sensitive strategies, namely the plug-in tangency portfolio and the global minimum variance portfolio. Both strategies perform substantially worse than the true optimum when the sample size is small. As the sample size increases, their Sharpe ratios improve because the estimates of the covariance matrix and expected returns become more precise. The improvement is particularly pronounced for the plug-in tangency portfolio, which depends on estimates of both $\hat{\mu}$ and $\hat{\Sigma}$.
+
+Overall, the results suggest that the equally weighted and inverse-volatility portfolios are the most robust to estimation error, while the plug-in tangency portfolio is the most sensitive. Although optimization-based strategies are theoretically attractive, their performance can deteriorate considerably when the inputs are estimated with noise.
+
+A practical lesson for investors is therefore that simpler portfolio rules may outperform highly optimized portfolios in realistic settings where parameters must be estimated from limited historical data. The analysis highlights that reducing estimation risk can be just as important as achieving theoretical optimality, especially when sample sizes are small.
