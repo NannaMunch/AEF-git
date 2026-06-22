@@ -668,7 +668,12 @@ mean_line = (
 @tbl-plugin-performance and @fig-plugin-performance show the out-of-sample performance of the plug-in tangency portfolio. The blue dashed line marks the Sharpe ratio of the true tangency portfolio, while the red dashed line marks the average plug-in Sharpe ratio for each sample size. The histograms show the distribution of plug-in Sharpe ratios across simulations. When \(T\) is small, the plug-in Sharpe ratios are dispersed and lie far below the true optimum. As \(T\) increases, the distribution shifts closer to the true Sharpe ratio, showing that performance improves when the sample moments are estimated more precisely.
 
 ## Exercise 7
-To study the robustness of different portfolio construction methods, we compare the plug-in tangency portfolio with several alternative strategies.
+In Exercise 6, we focused exclusively on the plug-in tangency portfolio and examined how estimation error affects its out-of-sample performance. The results showed that performance improves as the sample size increases and the estimated moments become more precise.
+
+We now extend the analysis by comparing the plug-in tangency portfolio with other alternative portfolio construction methods. Using the same simulation framework as in Exercise 5, each strategy is evaluated out-of-sample using the true parameters of the data-generating process. This allows us to assess which strategies are most robust to estimation error and whether simpler portfolio rules can outperform the plug-in tangency portfolio when parameters must be estimated from limited samples.
+
+
+To study the robustness of different portfolio construction methods, we compare the plug-in tangency portfolio with other alternative strategies.
 
 The first benchmark is the equally weighted portfolio, defined as
 
@@ -694,6 +699,7 @@ $$
 
 
 ```{python}
+```{python}
 #| label: ex7-strategies
 #| cache: true
 
@@ -702,19 +708,20 @@ def equal_weight_portfolio(n_assets):
 
 
 def compute_global_minimum_variance_portfolio(Sigma):
-    ones = np.ones(Sigma.shape[0])
-    inv_Sigma = np.linalg.inv(Sigma)
+    iota = np.ones(Sigma.shape[0])
+    sigma_inv = np.linalg.inv(Sigma)
 
-    weights = inv_Sigma @ ones
-    weights = weights / np.sum(weights)
+    omega_mvp = (sigma_inv @ iota) / (iota @ sigma_inv @ iota)
 
-    return weights
+    return omega_mvp
 
 
 def inverse_volatility_portfolio(Sigma):
     asset_volatility = np.sqrt(np.diag(Sigma))
     inverse_volatility = 1 / asset_volatility
+
     weights = inverse_volatility / np.sum(inverse_volatility)
+
     return weights
 ```
 
@@ -745,6 +752,8 @@ def simulate_strategy_performance(T, mu_true, Sigma_true, n_simulations=200):
             results.append({
                 "T": T,
                 "strategy": strategy,
+                "mean": performance["mean"],
+                "volatility": performance["volatility"],
                 "sharpe": performance["sharpe"]
             })
 
@@ -752,20 +761,35 @@ def simulate_strategy_performance(T, mu_true, Sigma_true, n_simulations=200):
 ```
 
 ```{python}
-#| label: tbl-strategy-performance
-#| tbl-cap: Average true Sharpe ratios across portfolio strategies and sample sizes.
+#| label: ex7-results
 #| cache: true
 
+sample_sizes_ex7 = [60, 120, 240, 500]
+
 results_ex7 = pd.concat(
-    [simulate_strategy_performance(T, mu, Sigma, n_simulations=200) for T in sample_sizes],
+    [
+        simulate_strategy_performance(T, mu, Sigma, n_simulations=200)
+        for T in sample_sizes_ex7
+    ],
     ignore_index=True
 )
 
 summary_ex7 = (
     results_ex7
     .groupby(["T", "strategy"], as_index=False)
-    .agg(mean_sharpe=("sharpe", "mean"))
+    .agg(
+        mean_return=("mean", "mean"),
+        mean_volatility=("volatility", "mean"),
+        mean_sharpe=("sharpe", "mean"),
+        std_sharpe=("sharpe", "std")
+    )
 )
+```
+
+```{python}
+#| label: tbl-strategy-performance
+#| tbl-cap: "Average out-of-sample Sharpe ratios across portfolio strategies and sample sizes."
+#| cache: true
 
 table_ex7 = (
     summary_ex7
@@ -779,7 +803,7 @@ table_ex7
 ```{python}
 #| label: fig-strategy-comparison
 #| fig-pos: H
-#| fig-cap: Average true Sharpe ratio across portfolio strategies.
+#| fig-cap: Average out-of-sample Sharpe ratio across portfolio strategies.
 
 (
     ggplot(summary_ex7, aes(x="T", y="mean_sharpe", linetype="strategy")) +
@@ -787,7 +811,7 @@ table_ex7
     geom_point() +
     labs(
         x="Sample size T",
-        y="Average true Sharpe ratio",
+        y="Average out-of-sample Sharpe ratio",
         linetype=""
     ) +
     theme_bw()
