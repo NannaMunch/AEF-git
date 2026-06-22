@@ -8,7 +8,7 @@ format:
     fontsize: 11pt
     geometry: margin=0.9in
     toc: false
-    number-sections: true
+    number-sections: false
 execute:
   echo: false
   warning: false
@@ -47,7 +47,7 @@ Following the assignment, we apply two liquidity screens to every month of data,
 ```{python}
 # Data file is stored locally (too large for the GitHub repository), so we
 # point directly to its absolute path on disk.
-DATA_FILE = "/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Mandatory assignment 3/crsp_monthly.parquet"
+DATA_FILE = "/Users/AstridMoeller/AEF/data/crsp_monthly.parquet"
 
 df_raw = pd.read_parquet(DATA_FILE)
 df_raw["date"] = pd.to_datetime(df_raw["date"])
@@ -239,11 +239,72 @@ def regularise_by_eigenvalue_floor(Sigma_raw, floor_frac=0.10):
 We verified that this — rather than any remaining covariance-conditioning issue — is the dominant source of instability in an earlier draft of this analysis, again using a controlled simulation. With $N=120$ assets, $T=36$ months, a known and constant true mean of zero, and an already well-conditioned covariance matrix (using the eigenvalue-floor fix from Exercise 3), the *unmodified* historical-mean estimator alone produces an average simulated monthly turnover of over 1,400%. Shrinking the estimated mean towards zero by a factor of 0.05 — that is, using only 5% of the raw historical-mean estimate — reduces this to approximately 105% per month, a much more economically plausible figure, while leaving the covariance matrix and all other inputs unchanged. This is conceptually the same idea as the Bayes-Stein shrinkage estimator of Jorion (1986), cited in the assignment's reference list, which similarly shrinks the sample mean towards a more stable target to counteract estimation noise. We apply this shrinkage in the simplified form of a single fixed intensity parameter, `MU_SHRINK = 0.05`, motivated entirely by this diagnostic exercise. Note that this shrinkage applies only to the historical-mean fallback; once genuine MA2 return predictions are substituted in, this parameter becomes irrelevant, since machine-learning forecasts are presumably better-behaved and need not be shrunk in this ad hoc way.
 
 ```{python}
-MU_SHRINK = 0.05
+import joblib
 
-def get_ml_predicted_returns(date, available_permnos, df_features=None, model=None):
-    """Placeholder; signals the backtest to use the shrunk historical-mean fallback."""
-    return None
+MU_SHRINK = 0.05  # shrinkage applied ONLY to the historical-mean fallback (see text)
+
+# ---- Load the fitted MA2 bundle (Elastic Net: preferred model in MA2) ----
+MA2_BUNDLE_PATH = "/Users/AstridMoeller/Documents/GitHub/AEF-git/Aflevering2/ma2_elastic_net_bundle.joblib"
+bundle          = joblib.load(MA2_BUNDLE_PATH)
+ma2_model       = bundle["model"]
+ma2_scaler      = bundle["scaler"]
+feature_columns = bundle["feature_columns"]
+cont_feats      = bundle["continuous_features"]
+stock_chars     = bundle["stock_chars"]
+macro_vars      = bundle["macro_vars"]
+
+# ---- Load the characteristics panel MA2 was built from (same Absalon file) ----
+CHARS_FILE = "/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet"
+chars = pd.read_parquet(CHARS_FILE)
+chars["date"] = pd.to_datetime(chars["date"])
+chars = chars[["permno", "date", "sic2"] + stock_chars + macro_vars].copy()
+
+# ---- Reproduce MA2 preprocessing exactly ----
+for col in stock_chars:                                    # monthly cross-sectional median
+    chars[col] = chars.groupby("date")[col].transform(lambda x: x.fillna(x.median()))
+chars[macro_vars] = chars[macro_vars].ffill().bfill()      # macro: fill over time
+
+def recode_sic(sic):
+    if pd.isna(sic):
+        return "Other"
+    sic = int(sic)
+    if sic < 10:   return "Agriculture"
+    elif sic < 15: return "Mining"
+    elif sic < 18: return "Construction"
+    elif sic < 40: return "Manufacturing"
+    elif sic < 50: return "Transportation"
+    elif sic < 52: return "Wholesale"
+    elif sic < 60: return "Retail"
+    elif sic < 70: return "Finance"
+    elif sic < 90: return "Services"
+    else:          return "Public Admin"
+
+chars["sic_division"] = chars["sic2"].apply(recode_sic)
+
+for s in stock_chars:                                      # characteristic x macro interactions
+    for m in macro_vars:
+        chars[f"{s}_x_{m}"] = chars[s] * chars[m]
+
+sic_dummies = pd.get_dummies(chars["sic_division"], prefix="sic", drop_first=True, dtype=int)
+chars = pd.concat([chars, sic_dummies], axis=1)
+
+# standardize continuous block with the SAVED MA2 scaler, align to MA2 column order
+chars[cont_feats] = ma2_scaler.transform(chars[cont_feats])
+X_chars = chars.reindex(columns=feature_columns, fill_value=0).fillna(0.0)
+
+chars["mu_hat"] = ma2_model.predict(X_chars)               # MA2 predicted excess return
+
+# features in month T predict the return of month T+1 -> shift to target month
+chars["target_month"] = chars["date"].dt.to_period("M") + 1
+mu_by_month = {
+    period: g.set_index("permno")["mu_hat"]
+    for period, g in chars.groupby("target_month")
+}
+
+def get_ml_predicted_returns(date, available_permnos=None):
+    """MA2-predicted excess returns (Series indexed by permno) for holding month
+    `date`, or None if the month is not covered (-> historical-mean fallback)."""
+    return mu_by_month.get(pd.Timestamp(date).to_period("M"))
 ```
 
 # Exercise 5 – Portfolio Backtest
@@ -282,9 +343,6 @@ def compute_turnover(w_new, w_prev, ret):
 ```
 
 ```{python}
-ma2_model   = None
-df_ma2_feat = None
-
 strategies  = ["naive", "tc_mv", "tc_mv_lw", "mv_noshort"]
 results     = {s: {"ret": [], "turnover": [], "dates": []} for s in strategies}
 w_prev = {s: None for s in strategies}
@@ -321,7 +379,7 @@ for t_idx, date in enumerate(oos_dates):
     lw_est.fit(X)
     Sigma_lw = lw_est.covariance_
 
-    ml_mu = get_ml_predicted_returns(date, permnos_w, df_ma2_feat, ma2_model)
+    ml_mu = get_ml_predicted_returns(date, permnos_w)
     if ml_mu is not None:
         mu_vec = ml_mu.reindex(permnos_w).fillna(ml_mu.mean()).values
     else:
