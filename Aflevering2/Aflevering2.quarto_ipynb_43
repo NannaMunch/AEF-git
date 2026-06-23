@@ -1,0 +1,1727 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "325f0ac6",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "title: Mandatory Assignment 2\n",
+    "author: Astrid Haarup Møller, Esmeralda Ophelia Larsson & Nanna Munch Kjøller\n",
+    "date: 2026-04-11\n",
+    "date-format: MMMM DD, YYYY\n",
+    "execute: \n",
+    "  echo: false\n",
+    "  warning: false\n",
+    "format:\n",
+    "  pdf: \n",
+    "    titlepage: true\n",
+    "    number-sections: false\n",
+    "    colorlinks: true\n",
+    "    geometry:\n",
+    "      - top=20mm\n",
+    "      - left=20mm\n",
+    "      - bottom=20mm\n",
+    "      - right=20mm\n",
+    "    bibliography: references.bib\n",
+    "    cite-method: natbib\n",
+    "    biblio-style: apalike  \n",
+    "    lang: en\n",
+    "    fontsize: 12pt\n",
+    "    highlight-style: github-light\n",
+    "---"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "ebd17035",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# standard library\n",
+    "from pathlib import Path\n",
+    "import itertools\n",
+    "\n",
+    "# data handling and model storage\n",
+    "import joblib\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import tidyfinance as tf\n",
+    "\n",
+    "# plotting\n",
+    "from plotnine import *\n",
+    "from mizani.formatters import percent_format\n",
+    "from IPython.display import Markdown\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "# statistical models\n",
+    "import statsmodels.api as sm\n",
+    "\n",
+    "# machine learning\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.linear_model import ElasticNet\n",
+    "from sklearn.ensemble import RandomForestRegressor\n",
+    "from sklearn.metrics import root_mean_squared_error"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f478de5e",
+   "metadata": {},
+   "source": [
+    "## Exercise 1\n",
+    "### 1a: Variable selection and sample restriction\n",
+    "First, we remove observations before year 2000. We then select ten stock-level characteristics based on the variable-importance rankings reported in @Gu.2020, Figure 5. Figure 5 shows that characteristics related to price trends, liquidity, size, and volatility consistently rank among the most important predictors across a wide range of machine learning models. Therefore, we include the price-trend variables `mom1m` and `mom12m`, the size and liquidity measures `mvel1` and `turn`, and the risk and volatility measures `beta` and `retvol`. In addition, we include the value characteristics `bm` and `ep`, the profitability measure `roaq`, and the investment measure `invest`, which receive relatively high importance rankings in Figure 5 and represent distinct return-predictive channels documented in the asset pricing literature. Rather than selecting only the highest-ranked characteristics, we aim to capture multiple dimensions of return predictability, including momentum, size, liquidity, risk, value, profitability, and investment. Together, these variables provide exposure to several of the most prominent return-predictive characteristics identified in both the machine learning and asset pricing literature.\n",
+    "\n",
+    "For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.2020 Table 4. The table shows that aggregate book-to-market `bm`, the Treasury bill rate `tbl`, the default yield spread `dfy`, and the term spread `tms` are among the most influential macroeconomic variables across several machine learning specifications. We therefore select `bm`, `tbl`, `dfy`, and `tms` as our four macroeconomic predictors. These variables capture aggregate valuation conditions, short-term interest rates, credit market conditions, and the slope of the yield curve, respectively, and are widely used in empirical asset pricing as indicators of the overall economic environment."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "34170390",
+   "metadata": {
+    "cache": false
+   },
+   "outputs": [],
+   "source": [
+    "df = pd.read_parquet(\"/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet\")\n",
+    "\n",
+    "# keep observations from January 2000 onward\n",
+    "df[\"date\"] = pd.to_datetime(df[\"date\"])\n",
+    "df = df.loc[df[\"date\"] >= \"2000-01-01\"].copy()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "46898d06",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "stock_chars = [\n",
+    "    \"characteristic_mom1m\",    # short-term reversal (price trend)\n",
+    "    \"characteristic_mom12m\",   # 12-month momentum (price trend)\n",
+    "    \"characteristic_mvel1\",    # size (liquidity)\n",
+    "    \"characteristic_turn\",     # share turnover (liquidity)\n",
+    "    \"characteristic_beta\",     # market beta (risk)\n",
+    "    \"characteristic_retvol\",   # return volatility (risk)\n",
+    "    \"characteristic_bm\",       # book-to-market (value)\n",
+    "    \"characteristic_ep\",       # earnings-to-price (value)\n",
+    "    \"characteristic_roaq\",     # profitability\n",
+    "    \"characteristic_invest\",   # investment growth\n",
+    "]\n",
+    "\n",
+    "macro_vars = [\n",
+    "    \"macro_bm\",    # aggregate book-to-market\n",
+    "    \"macro_tbl\",   # T-bill rate\n",
+    "    \"macro_dfy\",   # default yield spread\n",
+    "    \"macro_tms\",   # term spread\n",
+    "]\n",
+    "\n",
+    "base_cols = [\"permno\", \"date\", \"ret_excess\", \"mktcap_lag\", \"sic2\"]\n",
+    "df = df[base_cols + stock_chars + macro_vars].copy()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "d576805a",
+   "metadata": {},
+   "source": [
+    "### 1b: Summary Statistics and Missing Values\n",
+    "@tbl-summary-statistics reports summary statistics for the selected predictors. \n",
+    "```{=latex}\n",
+    "\\begingroup\n",
+    "\\footnotesize\n",
+    "```"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "tbl-summary-statistics",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>mean</th>\n",
+       "      <th>std</th>\n",
+       "      <th>25%</th>\n",
+       "      <th>50%</th>\n",
+       "      <th>75%</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>characteristic_mom1m</th>\n",
+       "      <td>-0.004</td>\n",
+       "      <td>0.604</td>\n",
+       "      <td>-0.550</td>\n",
+       "      <td>-0.009</td>\n",
+       "      <td>0.544</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_mom12m</th>\n",
+       "      <td>-0.007</td>\n",
+       "      <td>0.590</td>\n",
+       "      <td>-0.526</td>\n",
+       "      <td>-0.026</td>\n",
+       "      <td>0.519</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_mvel1</th>\n",
+       "      <td>0.026</td>\n",
+       "      <td>0.588</td>\n",
+       "      <td>-0.496</td>\n",
+       "      <td>0.044</td>\n",
+       "      <td>0.544</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_turn</th>\n",
+       "      <td>0.036</td>\n",
+       "      <td>0.576</td>\n",
+       "      <td>-0.453</td>\n",
+       "      <td>0.074</td>\n",
+       "      <td>0.532</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_beta</th>\n",
+       "      <td>0.076</td>\n",
+       "      <td>0.548</td>\n",
+       "      <td>-0.370</td>\n",
+       "      <td>0.102</td>\n",
+       "      <td>0.540</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_retvol</th>\n",
+       "      <td>0.123</td>\n",
+       "      <td>0.528</td>\n",
+       "      <td>-0.306</td>\n",
+       "      <td>0.146</td>\n",
+       "      <td>0.576</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_bm</th>\n",
+       "      <td>-0.065</td>\n",
+       "      <td>0.531</td>\n",
+       "      <td>-0.512</td>\n",
+       "      <td>-0.067</td>\n",
+       "      <td>0.373</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_ep</th>\n",
+       "      <td>-0.011</td>\n",
+       "      <td>0.558</td>\n",
+       "      <td>-0.486</td>\n",
+       "      <td>-0.004</td>\n",
+       "      <td>0.454</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_roaq</th>\n",
+       "      <td>-0.014</td>\n",
+       "      <td>0.560</td>\n",
+       "      <td>-0.477</td>\n",
+       "      <td>-0.023</td>\n",
+       "      <td>0.457</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>characteristic_invest</th>\n",
+       "      <td>-0.006</td>\n",
+       "      <td>0.533</td>\n",
+       "      <td>-0.427</td>\n",
+       "      <td>-0.000</td>\n",
+       "      <td>0.413</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>macro_bm</th>\n",
+       "      <td>0.276</td>\n",
+       "      <td>0.072</td>\n",
+       "      <td>0.239</td>\n",
+       "      <td>0.284</td>\n",
+       "      <td>0.328</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>macro_tbl</th>\n",
+       "      <td>0.018</td>\n",
+       "      <td>0.019</td>\n",
+       "      <td>0.001</td>\n",
+       "      <td>0.011</td>\n",
+       "      <td>0.028</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>macro_dfy</th>\n",
+       "      <td>0.010</td>\n",
+       "      <td>0.004</td>\n",
+       "      <td>0.008</td>\n",
+       "      <td>0.009</td>\n",
+       "      <td>0.012</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>macro_tms</th>\n",
+       "      <td>0.022</td>\n",
+       "      <td>0.014</td>\n",
+       "      <td>0.009</td>\n",
+       "      <td>0.023</td>\n",
+       "      <td>0.035</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "                        mean    std    25%    50%    75%\n",
+       "characteristic_mom1m  -0.004  0.604 -0.550 -0.009  0.544\n",
+       "characteristic_mom12m -0.007  0.590 -0.526 -0.026  0.519\n",
+       "characteristic_mvel1   0.026  0.588 -0.496  0.044  0.544\n",
+       "characteristic_turn    0.036  0.576 -0.453  0.074  0.532\n",
+       "characteristic_beta    0.076  0.548 -0.370  0.102  0.540\n",
+       "characteristic_retvol  0.123  0.528 -0.306  0.146  0.576\n",
+       "characteristic_bm     -0.065  0.531 -0.512 -0.067  0.373\n",
+       "characteristic_ep     -0.011  0.558 -0.486 -0.004  0.454\n",
+       "characteristic_roaq   -0.014  0.560 -0.477 -0.023  0.457\n",
+       "characteristic_invest -0.006  0.533 -0.427 -0.000  0.413\n",
+       "macro_bm               0.276  0.072  0.239  0.284  0.328\n",
+       "macro_tbl              0.018  0.019  0.001  0.011  0.028\n",
+       "macro_dfy              0.010  0.004  0.008  0.009  0.012\n",
+       "macro_tms              0.022  0.014  0.009  0.023  0.035"
+      ]
+     },
+     "execution_count": 4,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| label: tbl-summary-statistics\n",
+    "#| tbl-cap: Summary statistics for selected predictors\n",
+    "\n",
+    "summary_table = (\n",
+    "    df[stock_chars + macro_vars]\n",
+    "    .describe()\n",
+    "    .T[[\"mean\", \"std\", \"25%\", \"50%\", \"75%\"]]\n",
+    "    .round(3)\n",
+    ")\n",
+    "\n",
+    "summary_table"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "cc3aeed5",
+   "metadata": {},
+   "source": [
+    "```{=latex}\n",
+    "\\endgroup\n",
+    "```\n",
+    "We first inspect missing values across the selected stock-level characteristics, macroeconomic variables, the prediction target, lagged market capitalization, and industry classification. In the current sample, no missing values are observed in these variables, and the cleaning procedure therefore does not reduce the number of observations.\n",
+    "\n",
+    "As a safeguard and to ensure a consistent preprocessing pipeline, missing values in stock-level characteristics are handled using monthly cross-sectional median imputation. This approach would preserve stock-month observations while relying only on contemporaneous information from the same month. The median is preferred to the mean because it is less sensitive to extreme firm-level observations, which are common in financial data.\n",
+    "\n",
+    "Macroeconomic variables are common to all firms within a given month and vary only over time. Since no missing macroeconomic values are observed in the current sample, no macro imputation is required. Nevertheless, the preprocessing pipeline applies forward filling if missing macroeconomic values are encountered, so that only previously observed macroeconomic information is used. Backward filling is avoided to prevent look-ahead bias.\n",
+    "\n",
+    "Finally, observations with missing excess returns or lagged market capitalization would be dropped if present because `ret_excess` is the prediction target and `mktcap_lag` is required to construct value-weighted portfolio returns."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "356250d5",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# define variables to check\n",
+    "vars_to_check = stock_chars + macro_vars + [\"ret_excess\", \"mktcap_lag\", \"sic2\"]\n",
+    "\n",
+    "# sample size before cleaning\n",
+    "n_obs_before = len(df)\n",
+    "n_firms_before = df[\"permno\"].nunique()\n",
+    "n_months_before = df[\"date\"].nunique()\n",
+    "\n",
+    "# check missing values before cleaning\n",
+    "missing_before = pd.DataFrame({\n",
+    "    \"missing_count\": df[vars_to_check].isna().sum(),\n",
+    "    \"missing_share\": df[vars_to_check].isna().mean()\n",
+    "}).sort_values(\"missing_share\", ascending=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "471c6d33",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# impute stock characteristics with monthly cross-sectional medians\n",
+    "# as a safeguard if missing values are encountered\n",
+    "for col in stock_chars:\n",
+    "    df[col] = df.groupby(\"date\")[col].transform(lambda x: x.fillna(x.median()))\n",
+    "\n",
+    "# forward fill macro variables as a safeguard if missing values are encountered\n",
+    "df[macro_vars] = df[macro_vars].ffill()\n",
+    "\n",
+    "# drop rows missing target or portfolio weight variable\n",
+    "df = df.dropna(subset=[\"ret_excess\", \"mktcap_lag\"]).copy()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "c0d59667",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "n_obs_final = len(df)\n",
+    "n_firms_final = df[\"permno\"].nunique()\n",
+    "n_months_final = df[\"date\"].nunique()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "6a269616",
+   "metadata": {
+    "user_expressions": [
+     {
+      "expression": "f\"{n_obs_final:,}\"",
+      "result": {
+       "data": {
+        "text/plain": "'1,111,605'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{n_firms_final:,}\"",
+      "result": {
+       "data": {
+        "text/plain": "'10,692'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "n_months_final",
+      "result": {
+       "data": {
+        "text/plain": "264"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     }
+    ]
+   },
+   "source": [
+    "After cleaning, the final sample contains `{python} f\"{n_obs_final:,}\"` stock-month observations across `{python} f\"{n_firms_final:,}\"` firms and `{python} n_months_final` months. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.\n",
+    "\n",
+    "### 1c: Feature matrix construction\n",
+    "First, we recode `sic2` into the 10 major SIC divisions to retain broad industry information while keeping the feature space manageable. This reduces the number of industry dummy variables and lowers the risk that sparse industry categories create noisy predictors in the machine learning models."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "1a023930",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def recode_sic(sic):\n",
+    "    if pd.isna(sic):\n",
+    "        return \"Other\"\n",
+    "    sic = int(sic)\n",
+    "    if sic < 10:\n",
+    "        return \"Agriculture\"\n",
+    "    elif sic < 15:\n",
+    "        return \"Mining\"\n",
+    "    elif sic < 18:\n",
+    "        return \"Construction\"\n",
+    "    elif sic < 40:\n",
+    "        return \"Manufacturing\"\n",
+    "    elif sic < 50:\n",
+    "        return \"Transportation\"\n",
+    "    elif sic < 52:\n",
+    "        return \"Wholesale\"\n",
+    "    elif sic < 60:\n",
+    "        return \"Retail\"\n",
+    "    elif sic < 70:\n",
+    "        return \"Finance\"\n",
+    "    elif sic < 90:\n",
+    "        return \"Services\"\n",
+    "    else:\n",
+    "        return \"Public Admin\"\n",
+    "\n",
+    "df[\"sic_division\"] = df[\"sic2\"].apply(recode_sic)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "6a72a9ee",
+   "metadata": {},
+   "source": [
+    "Then, we construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. \n",
+    "\n",
+    "The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "ff0e193d",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# create stock characteristic × macro interactions\n",
+    "interaction_cols = []\n",
+    "for s in stock_chars:\n",
+    "    for m in macro_vars:\n",
+    "        name = f\"{s}_x_{m}\"\n",
+    "        df[name] = df[s] * df[m]\n",
+    "        interaction_cols.append(name)\n",
+    "\n",
+    "# one-hot encode broad industry groups\n",
+    "sic_dummies = pd.get_dummies(df[\"sic_division\"], prefix=\"sic\", drop_first=True, dtype=int)\n",
+    "\n",
+    "# final feature sets\n",
+    "continuous_features = stock_chars + interaction_cols\n",
+    "dummy_features = list(sic_dummies.columns)\n",
+    "\n",
+    "# build feature matrix, target variable, and metadata\n",
+    "X = pd.concat(\n",
+    "    [df[continuous_features].reset_index(drop=True),\n",
+    "     sic_dummies.reset_index(drop=True)],\n",
+    "    axis=1\n",
+    ")\n",
+    "\n",
+    "y = df[\"ret_excess\"].reset_index(drop=True)\n",
+    "\n",
+    "meta = df[[\"permno\", \"date\", \"mktcap_lag\", \"ret_excess\"]].reset_index(drop=True)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "id": "355ee36e",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# to control number features\n",
+    "feature_count = pd.DataFrame({\n",
+    "    \"feature_group\": [\n",
+    "        \"Stock characteristics\",\n",
+    "        \"Characteristic-macro interactions\",\n",
+    "        \"Industry dummies\",\n",
+    "        \"Total\"\n",
+    "    ],\n",
+    "    \"n_features\": [\n",
+    "        len(stock_chars),\n",
+    "        len(interaction_cols),\n",
+    "        len(dummy_features),\n",
+    "        X.shape[1]\n",
+    "    ]\n",
+    "})"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9a48d4d9",
+   "metadata": {},
+   "source": [
+    "## Exercise 2\n",
+    "### Exercise 2a: Model descriptions\n",
+    "**Elastic Net** is a penalized linear regression model that combines the variable selection property of the Lasso with the coefficient shrinkage of Ridge regression. It is useful in our setting because the feature matrix contains many correlated predictors, including characteristic-macro interactions. The model minimizes prediction error while penalizing large coefficients, which helps reduce overfitting.\n",
+    "\n",
+    "The key hyperparameters are the overall penalty strength (`alpha`) and the mixing parameter (`l1_ratio`). A higher `alpha` implies stronger regularization, while `l1_ratio` controls the balance between Lasso and Ridge. When `l1_ratio = 1`, the model corresponds to the Lasso; when `l1_ratio = 0`, it corresponds to Ridge regression.\n",
+    "\n",
+    "**Random Forest** is a nonlinear tree-based ensemble model. It builds many regression trees on different bootstrap samples of the data and averages their predictions. Each tree recursively splits the feature space into groups with similar realized excess returns. Averaging across trees reduces the instability of individual decision trees and helps improve out-of-sample performance.\n",
+    "\n",
+    "The key hyperparameters are the number of trees (`n_estimators`), the number of predictors considered at each split (`max_features`), the minimum number of observations required in a leaf (`min_samples_leaf`), and tree depth (`max_depth`). Compared with Elastic Net, Random Forest is more flexible because it can capture nonlinearities and interactions without imposing a linear functional form.\n",
+    "\n",
+    "Together, the two models provide a comparison between a regularized linear benchmark and a flexible nonlinear machine learning model.\n",
+    "\n",
+    "### Exercise 2b: Time-respecting data split\n",
+    "The dataset is split chronologically to avoid look-ahead bias. Training observations precede validation observations, which in turn precede test observations. The most recent 20% of months are reserved for the test set and are only used for final out-of-sample evaluation, as shown in @tbl-split.\n",
+    "\n",
+    "The remaining 80% of months is split into training and validation samples, yielding an approximate 60/20/20 split. The training set is used to estimate model parameters, while the validation set is used for hyperparameter tuning. The split is performed by month rather than by individual rows to preserve the panel structure."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "id": "4d1bb2e7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# split by unique dates rather than raw rows\n",
+    "unique_dates = sorted(meta[\"date\"].unique())\n",
+    "\n",
+    "n_dates = len(unique_dates)\n",
+    "test_start = int(n_dates * 0.80)\n",
+    "val_start = int(test_start * 0.75)\n",
+    "\n",
+    "train_dates = unique_dates[:val_start]\n",
+    "val_dates   = unique_dates[val_start:test_start]\n",
+    "test_dates  = unique_dates[test_start:]\n",
+    "\n",
+    "train_mask = meta[\"date\"].isin(train_dates)\n",
+    "val_mask   = meta[\"date\"].isin(val_dates)\n",
+    "test_mask  = meta[\"date\"].isin(test_dates)\n",
+    "\n",
+    "X_train = X.loc[train_mask].reset_index(drop=True).copy()\n",
+    "X_val   = X.loc[val_mask].reset_index(drop=True).copy()\n",
+    "X_test  = X.loc[test_mask].reset_index(drop=True).copy()\n",
+    "\n",
+    "y_train = y.loc[train_mask].reset_index(drop=True).copy()\n",
+    "y_val   = y.loc[val_mask].reset_index(drop=True).copy()\n",
+    "y_test  = y.loc[test_mask].reset_index(drop=True).copy()\n",
+    "\n",
+    "meta_train = meta.loc[train_mask].reset_index(drop=True).copy()\n",
+    "meta_val   = meta.loc[val_mask].reset_index(drop=True).copy()\n",
+    "meta_test  = meta.loc[test_mask].reset_index(drop=True).copy()\n",
+    "\n",
+    "# standardize continuous predictors using training data only\n",
+    "continuous_features = stock_chars + interaction_cols\n",
+    "\n",
+    "scaler = StandardScaler()\n",
+    "X_train[continuous_features] = scaler.fit_transform(X_train[continuous_features])\n",
+    "X_val[continuous_features]   = scaler.transform(X_val[continuous_features])\n",
+    "X_test[continuous_features]  = scaler.transform(X_test[continuous_features])\n",
+    "\n",
+    "split_summary = pd.DataFrame({\n",
+    "    \"Sample\": [\"Train\", \"Validation\", \"Test\"],\n",
+    "    \"Start date\": [\n",
+    "        meta_train[\"date\"].min().date(),\n",
+    "        meta_val[\"date\"].min().date(),\n",
+    "        meta_test[\"date\"].min().date()\n",
+    "    ],\n",
+    "    \"End date\": [\n",
+    "        meta_train[\"date\"].max().date(),\n",
+    "        meta_val[\"date\"].max().date(),\n",
+    "        meta_test[\"date\"].max().date()\n",
+    "    ],\n",
+    "    \"Months\": [len(train_dates), len(val_dates), len(test_dates)],\n",
+    "    \"Observations\": [len(X_train), len(X_val), len(X_test)]\n",
+    "})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "id": "tbl-split",
+   "metadata": {
+    "results": "asis"
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>Sample</th>\n",
+       "      <th>Start date</th>\n",
+       "      <th>End date</th>\n",
+       "      <th>Months</th>\n",
+       "      <th>Observations</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>Train</td>\n",
+       "      <td>2000-01-01</td>\n",
+       "      <td>2013-02-01</td>\n",
+       "      <td>158</td>\n",
+       "      <td>748902</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>Validation</td>\n",
+       "      <td>2013-03-01</td>\n",
+       "      <td>2017-07-01</td>\n",
+       "      <td>53</td>\n",
+       "      <td>194460</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>Test</td>\n",
+       "      <td>2017-08-01</td>\n",
+       "      <td>2021-12-01</td>\n",
+       "      <td>53</td>\n",
+       "      <td>168243</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "       Sample  Start date    End date  Months  Observations\n",
+       "0       Train  2000-01-01  2013-02-01     158        748902\n",
+       "1  Validation  2013-03-01  2017-07-01      53        194460\n",
+       "2        Test  2017-08-01  2021-12-01      53        168243"
+      ]
+     },
+     "execution_count": 12,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| label: tbl-split\n",
+    "#| tbl-cap: Time-respecting train/validation/test split with date ranges and sizes\n",
+    "split_summary"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "4bda7da8",
+   "metadata": {},
+   "source": [
+    "Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.\n",
+    "\n",
+    "### Exercise 2c: Hyperparameter tuning\n",
+    "Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the mean squared prediction error objective in @Gu.2020. For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, we vary tree depth while keeping the number of trees, feature subsampling rule, and minimum leaf size fixed. This allows us to examine how increasing model complexity affects predictive accuracy while keeping computation feasible.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "id": "b10f2448",
+   "metadata": {
+    "cache": true
+   },
+   "outputs": [],
+   "source": [
+    "# elastic net hyperparameter grid\n",
+    "en_param_grid = {\n",
+    "    \"alpha\": [0.001, 0.01, 0.1],\n",
+    "    \"l1_ratio\": [0.2, 0.5, 0.8],\n",
+    "}\n",
+    "\n",
+    "en_results = []\n",
+    "\n",
+    "for params in [dict(zip(en_param_grid, v)) for v in itertools.product(*en_param_grid.values())]:\n",
+    "    model = ElasticNet(\n",
+    "        max_iter=5000,\n",
+    "        fit_intercept=True,\n",
+    "        random_state=42,\n",
+    "        **params\n",
+    "    )\n",
+    "\n",
+    "    model.fit(X_train, y_train)\n",
+    "\n",
+    "    en_results.append({\n",
+    "        **params,\n",
+    "        \"train_rmse\": root_mean_squared_error(y_train, model.predict(X_train)),\n",
+    "        \"val_rmse\": root_mean_squared_error(y_val, model.predict(X_val))\n",
+    "    })\n",
+    "\n",
+    "en_results_df = pd.DataFrame(en_results).sort_values(\"val_rmse\")\n",
+    "\n",
+    "best_en_params = en_results_df.iloc[0][[\"alpha\", \"l1_ratio\"]].to_dict()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "id": "43cb934d",
+   "metadata": {
+    "cache": true
+   },
+   "outputs": [],
+   "source": [
+    "# random forest hyperparameter grid\n",
+    "rf_param_grid = {\n",
+    "    \"n_estimators\": [50],\n",
+    "    \"max_features\": [\"sqrt\"],\n",
+    "    \"min_samples_leaf\": [100],\n",
+    "    \"max_depth\": [3, 5, 8], # vary depth to illustrate complexity\n",
+    "}\n",
+    "\n",
+    "rf_results = []\n",
+    "\n",
+    "for params in [dict(zip(rf_param_grid, v)) for v in itertools.product(*rf_param_grid.values())]:\n",
+    "    model = RandomForestRegressor(\n",
+    "        random_state=42,\n",
+    "        n_jobs=-1,\n",
+    "        **params\n",
+    "    )\n",
+    "\n",
+    "    model.fit(X_train, y_train)\n",
+    "\n",
+    "    rf_results.append({\n",
+    "        **params,\n",
+    "        \"train_rmse\": root_mean_squared_error(y_train, model.predict(X_train)),\n",
+    "        \"val_rmse\": root_mean_squared_error(y_val, model.predict(X_val))\n",
+    "    })\n",
+    "\n",
+    "rf_results_df = pd.DataFrame(rf_results).sort_values(\"val_rmse\")\n",
+    "\n",
+    "best_rf_params = rf_results_df.iloc[0][\n",
+    "    [\"n_estimators\", \"max_features\", \"min_samples_leaf\", \"max_depth\"]\n",
+    "].to_dict()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "id": "fig-tuning-rmse",
+   "metadata": {
+    "cache": true
+   },
+   "outputs": [
+    {
+     "data": {
+      "application/pdf": "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bnJpZ2h0IDQ2IC9wZXJpb2QgNDggL3plcm8gL29uZSAvdHdvIC90aHJlZQovZm91ciAvZml2ZSAvc2l4IC9zZXZlbiAvZWlnaHQgL25pbmUgNjkgL0UgL0YgNzcgL00gL04gODAgL1AgODIgL1IgL1MgL1QgODYKL1YgOTcgL2EgOTkgL2MgL2QgL2UgMTAzIC9nIC9oIC9pIDEwOCAvbCAvbSAvbiAvbyAvcCAxMTQgL3IgL3MgL3QgMTIxIC95IF0KPj4KL1dpZHRocyAxNyAwIFIgPj4KZW5kb2JqCjE4IDAgb2JqCjw8IC9UeXBlIC9Gb250RGVzY3JpcHRvciAvRm9udE5hbWUgL0JNUVFEVitEZWphVnVTYW5zIC9GbGFncyAzMgovRm9udEJCb3ggWyAtMTAyMSAtNDYzIDE3OTQgMTIzMyBdIC9Bc2NlbnQgOTI5IC9EZXNjZW50IC0yMzYgL0NhcEhlaWdodCAwCi9YSGVpZ2h0IDAgL0l0YWxpY0FuZ2xlIDAgL1N0ZW1WIDAgL01heFdpZHRoIDEzNDIgPj4KZW5kb2JqCjE3IDAgb2JqClsgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAKNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCAzMTggNDAxIDQ2MCA4MzggNjM2Cjk1MCA3ODAgMjc1IDM5MCAzOTAgNTAwIDgzOCAzMTggMzYxIDMxOCAzMzcgNjM2IDYzNiA2MzYgNjM2IDYzNiA2MzYgNjM2IDYzNgo2MzYgNjM2IDMzNyAzMzcgODM4IDgzOCA4MzggNTMxIDEwMDAgNjg0IDY4NiA2OTggNzcwIDYzMiA1NzUgNzc1IDc1MiAyOTUKMjk1IDY1NiA1NTcgODYzIDc0OCA3ODcgNjAzIDc4NyA2OTUgNjM1IDYxMSA3MzIgNjg0IDk4OSA2ODUgNjExIDY4NSAzOTAgMzM3CjM5MCA4MzggNTAwIDUwMCA2MTMgNjM1IDU1MCA2MzUgNjE1IDM1MiA2MzUgNjM0IDI3OCAyNzggNTc5IDI3OCA5NzQgNjM0IDYxMgo2MzUgNjM1IDQxMSA1MjEgMzkyIDYzNCA1OTIgODE4IDU5MiA1OTIgNTI1IDYzNiAzMzcgNjM2IDgzOCA2MDAgNjM2IDYwMCAzMTgKMzUyIDUxOCAxMDAwIDUwMCA1MDAgNTAwIDEzNDIgNjM1IDQwMCAxMDcwIDYwMCA2ODUgNjAwIDYwMCAzMTggMzE4IDUxOCA1MTgKNTkwIDUwMCAxMDAwIDUwMCAxMDAwIDUyMSA0MDAgMTAyMyA2MDAgNTI1IDYxMSAzMTggNDAxIDYzNiA2MzYgNjM2IDYzNiAzMzcKNTAwIDUwMCAxMDAwIDQ3MSA2MTIgODM4IDM2MSAxMDAwIDUwMCA1MDAgODM4IDQwMSA0MDEgNTAwIDYzNiA2MzYgMzE4IDUwMAo0MDEgNDcxIDYxMiA5NjkgOTY5IDk2OSA1MzEgNjg0IDY4NCA2ODQgNjg0IDY4NCA2ODQgOTc0IDY5OCA2MzIgNjMyIDYzMiA2MzIKMjk1IDI5NSAyOTUgMjk1IDc3NSA3NDggNzg3IDc4NyA3ODcgNzg3IDc4NyA4MzggNzg3IDczMiA3MzIgNzMyIDczMiA2MTEgNjA1CjYzMCA2MTMgNjEzIDYxMyA2MTMgNjEzIDYxMyA5ODIgNTUwIDYxNSA2MTUgNjE1IDYxNSAyNzggMjc4IDI3OCAyNzggNjEyIDYzNAo2MTIgNjEyIDYxMiA2MTIgNjEyIDgzOCA2MTIgNjM0IDYzNCA2MzQgNjM0IDU5MiA2MzUgNTkyIF0KZW5kb2JqCjIwIDAgb2JqCjw8IC9FIDIxIDAgUiAvRiAyMiAwIFIgL00gMjMgMCBSIC9OIDI0IDAgUiAvUCAyNSAwIFIgL1IgMjYgMCBSIC9TIDI3IDAgUgovVCAyOCAwIFIgL1YgMjkgMCBSIC9hIDMwIDAgUiAvYyAzMSAwIFIgL2QgMzIgMCBSIC9lIDMzIDAgUiAvZWlnaHQgMzQgMCBSCi9maXZlIDM1IDAgUiAvZm91ciAzNiAwIFIgL2cgMzcgMCBSIC9oIDM4IDAgUiAvaSAzOSAwIFIgL2wgNDAgMCBSIC9tIDQxIDAgUgovbiA0MyAwIFIgL25pbmUgNDQgMCBSIC9vIDQ1IDAgUiAvb25lIDQ2IDAgUiAvcCA0NyAwIFIgL3BhcmVubGVmdCA0OCAwIFIKL3BhcmVucmlnaHQg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MCBuIAowMDAwMDE1NjI1IDAwMDAwIG4gCjAwMDAwMTU2NDYgMDAwMDAgbiAKMDAwMDAxNTY2NyAwMDAwMCBuIAowMDAwMDAwMDY1IDAwMDAwIG4gCjAwMDAwMDAzNDIgMDAwMDAgbiAKMDAwMDAwMjk2NSAwMDAwMCBuIAowMDAwMDAwMjA4IDAwMDAwIG4gCjAwMDAwMDI5NDQgMDAwMDAgbiAKMDAwMDAxNTc2MCAwMDAwMCBuIAowMDAwMDE2MDE0IDAwMDAwIG4gCjAwMDAwMTYyNjggMDAwMDAgbiAKMDAwMDAxNjUyMiAwMDAwMCBuIAowMDAwMDEzOTMwIDAwMDAwIG4gCjAwMDAwMTM3MjMgMDAwMDAgbiAKMDAwMDAxMzE5NCAwMDAwMCBuIAowMDAwMDE0OTgzIDAwMDAwIG4gCjAwMDAwMDI5ODUgMDAwMDAgbiAKMDAwMDAwMzEzOCAwMDAwMCBuIAowMDAwMDAzMjg2IDAwMDAwIG4gCjAwMDAwMDM0NDggMDAwMDAgbiAKMDAwMDAwMzU5NyAwMDAwMCBuIAowMDAwMDAzODQwIDAwMDAwIG4gCjAwMDAwMDQxNDUgMDAwMDAgbiAKMDAwMDAwNDU1OSAwMDAwMCBuIAowMDAwMDA0Njk3IDAwMDAwIG4gCjAwMDAwMDQ4NDEgMDAwMDAgbiAKMDAwMDAwNTIyMSAwMDAwMCBuIAowMDAwMDA1NTI2IDAwMDAwIG4gCjAwMDAwMDU4MzAgMDAwMDAgbiAKMDAwMDAwNjE1MiAwMDAwMCBuIAowMDAwMDA2NjIwIDAwMDAwIG4gCjAwMDAwMDY5NDIgMDAwMDAgbiAKMDAwMDAwNzEwOCAwMDAwMCBuIAowMDAwMDA3NTIyIDAwMDAwIG4gCjAwMDAwMDc3NTkgMDAwMDAgbiAKMDAwMDAwNzkwMyAwMDAwMCBuIAowMDAwMDA4MDIyIDAwMDAwIG4gCjAwMDAwMDgzNTMgMDAwMDAgbiAKMDAwMDAwODUyNSAwMDAwMCBuIAowMDAwMDA4NzYxIDAwMDAwIG4gCjAwMDAwMDkxNTYgMDAwMDAgbiAKMDAwMDAwOTQ0NyAwMDAwMCBuIAowMDAwMDA5NjAyIDAwMDAwIG4gCjAwMDAwMDk5MTQgMDAwMDAgbiAKMDAwMDAxMDEzNyAwMDAwMCBuIAowMDAwMDEwMzYxIDAwMDAwIG4gCjAwMDAwMTA0ODQgMDAwMDAgbiAKMDAwMDAxMDcxNyAwMDAwMCBuIAowMDAwMDExMTI0IDAwMDAwIG4gCjAwMDAwMTEyNjYgMDAwMDAgbiAKMDAwMDAxMTY1OSAwMDAwMCBuIAowMDAwMDExNzQ5IDAwMDAwIG4gCjAwMDAwMTE5NTUgMDAwMDAgbiAKMDAwMDAxMjM2OCAwMDAwMCBuIAowMDAwMDEyNjkyIDAwMDAwIG4gCjAwMDAwMTI5MDYgMDAwMDAgbiAKMDAwMDAxNjgzNiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYyIC9Sb290IDEgMCBSIC9JbmZvIDYxIDAgUiA+PgpzdGFydHhyZWYKMTY5OTUKJSVFT0YK",
+      "text/plain": [
+       "<Figure size 3000x1200 with 2 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "#| label: fig-tuning-rmse\n",
+    "#| fig-cap: Training and validation RMSE across model complexity\n",
+    "\n",
+    "# Elastic Net: average RMSE by alpha across l1_ratio values\n",
+    "en_plot = (\n",
+    "    en_results_df\n",
+    "    .groupby(\"alpha\")[[\"train_rmse\", \"val_rmse\"]]\n",
+    "    .mean()\n",
+    "    .reset_index()\n",
+    "    .sort_values(\"alpha\")\n",
+    ")\n",
+    "\n",
+    "# Random Forest: RMSE by max_depth\n",
+    "rf_plot = (\n",
+    "    rf_results_df\n",
+    "    .groupby(\"max_depth\")[[\"train_rmse\", \"val_rmse\"]]\n",
+    "    .mean()\n",
+    "    .reset_index()\n",
+    "    .sort_values(\"max_depth\")\n",
+    ")\n",
+    "\n",
+    "fig, axes = plt.subplots(1, 2, figsize=(10, 4))\n",
+    "\n",
+    "# Elastic Net\n",
+    "axes[0].plot(en_plot[\"alpha\"], en_plot[\"train_rmse\"], marker=\"o\", label=\"Train RMSE\")\n",
+    "axes[0].plot(en_plot[\"alpha\"], en_plot[\"val_rmse\"], marker=\"o\", label=\"Validation RMSE\")\n",
+    "axes[0].set_xscale(\"log\")\n",
+    "axes[0].set_title(\"Elastic Net\")\n",
+    "axes[0].set_xlabel(\"Penalty strength (alpha)\")\n",
+    "axes[0].set_ylabel(\"RMSE\")\n",
+    "axes[0].legend()\n",
+    "\n",
+    "# Random Forest\n",
+    "axes[1].plot(rf_plot[\"max_depth\"], rf_plot[\"train_rmse\"], marker=\"o\", label=\"Train RMSE\")\n",
+    "axes[1].plot(rf_plot[\"max_depth\"], rf_plot[\"val_rmse\"], marker=\"o\", label=\"Validation RMSE\")\n",
+    "axes[1].set_title(\"Random Forest\")\n",
+    "axes[1].set_xlabel(\"Tree depth\")\n",
+    "axes[1].set_ylabel(\"RMSE\")\n",
+    "axes[1].legend()\n",
+    "\n",
+    "plt.tight_layout()\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f7f6a388",
+   "metadata": {},
+   "source": [
+    "The model selection is shown in @tbl-model-selection. The final specification for each model is selected as the one with the lowest validation RMSE. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "id": "tbl-model-selection",
+   "metadata": {
+    "cache": true
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/markdown": [
+       "| Model         | Selected specification      |   Train RMSE |   Validation RMSE |\n",
+       "|:--------------|:----------------------------|-------------:|------------------:|\n",
+       "| Elastic Net   | alpha=0.1, l1_ratio=0.2     |     0.199689 |          0.157523 |\n",
+       "| Random Forest | trees=50, depth=8, leaf=100 |     0.196722 |          0.157406 |"
+      ],
+      "text/plain": [
+       "<IPython.core.display.Markdown object>"
+      ]
+     },
+     "execution_count": 16,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| label: tbl-model-selection\n",
+    "#| tbl-cap: Selected hyperparameters and validation RMSE\n",
+    "\n",
+    "# fit final elastic net model using selected hyperparameters\n",
+    "final_en = ElasticNet(\n",
+    "    alpha=best_en_params[\"alpha\"],\n",
+    "    l1_ratio=best_en_params[\"l1_ratio\"],\n",
+    "    max_iter=5000,\n",
+    "    fit_intercept=True,\n",
+    "    random_state=42\n",
+    ")\n",
+    "\n",
+    "final_en.fit(X_train, y_train)\n",
+    "\n",
+    "# fit final random forest model using selected hyperparameters\n",
+    "final_rf = RandomForestRegressor(\n",
+    "    n_estimators=int(best_rf_params[\"n_estimators\"]),\n",
+    "    max_features=best_rf_params[\"max_features\"],\n",
+    "    min_samples_leaf=int(best_rf_params[\"min_samples_leaf\"]),\n",
+    "    max_depth=int(best_rf_params[\"max_depth\"]),\n",
+    "    random_state=42,\n",
+    "    n_jobs=-1\n",
+    ")\n",
+    "\n",
+    "final_rf.fit(X_train, y_train)\n",
+    "\n",
+    "# compare selected models on training and validation samples\n",
+    "selected_results = pd.DataFrame({\n",
+    "    \"Model\": [\"Elastic Net\", \"Random Forest\"],\n",
+    "    \"Selected specification\": [\n",
+    "        f\"alpha={best_en_params['alpha']}, l1_ratio={best_en_params['l1_ratio']}\",\n",
+    "        f\"trees={int(best_rf_params['n_estimators'])}, depth={int(best_rf_params['max_depth'])}, leaf={int(best_rf_params['min_samples_leaf'])}\"\n",
+    "    ],\n",
+    "    \"Train RMSE\": [\n",
+    "        root_mean_squared_error(y_train, final_en.predict(X_train)),\n",
+    "        root_mean_squared_error(y_train, final_rf.predict(X_train))\n",
+    "    ],\n",
+    "    \"Validation RMSE\": [\n",
+    "        root_mean_squared_error(y_val, final_en.predict(X_val)),\n",
+    "        root_mean_squared_error(y_val, final_rf.predict(X_val))\n",
+    "    ]\n",
+    "}).round(6)\n",
+    "\n",
+    "Markdown(selected_results.round(6).to_markdown(index=False))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "fa83aab9",
+   "metadata": {},
+   "source": [
+    "### Exercise 2d: Save models to disk"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "id": "e2a71f83",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "['model_random_forest.joblib']"
+      ]
+     },
+     "execution_count": 17,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| output: false\n",
+    "\n",
+    "joblib.dump(final_en, \"model_elastic_net.joblib\")\n",
+    "joblib.dump(final_rf, \"model_random_forest.joblib\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "58ff6072",
+   "metadata": {},
+   "source": [
+    "To load the models for peer review, run:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 18,
+   "id": "976e7c86",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#| eval: false\n",
+    "#| echo: true\n",
+    "final_en = joblib.load(\"model_elastic_net.joblib\")\n",
+    "final_rf = joblib.load(\"model_random_forest.joblib\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "f6dd8a2e",
+   "metadata": {},
+   "source": [
+    "The final fitted models are saved to disk using `joblib` to ensure reproducibility and facilitate peer review.\n",
+    "\n",
+    "## Exercise 3\n",
+    "### Exercise 3a-c: Predictions and long-short portfolios\n",
+    "Using the fitted Elastic Net and Random Forest models from Exercise 2, we generate predicted excess returns for each stock-month observation in the validation and test samples. The test set is only used for final out-of-sample evaluation and is not used for model fitting or hyperparameter selection."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "id": "7ca02b46",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# generate predictions directly from fitted models\n",
+    "pred_val_en = final_en.predict(X_val)\n",
+    "pred_val_rf = final_rf.predict(X_val)\n",
+    "\n",
+    "pred_test_en = final_en.predict(X_test)\n",
+    "pred_test_rf = final_rf.predict(X_test)\n",
+    "\n",
+    "# add predictions to metadata\n",
+    "meta_val = meta_val.copy()\n",
+    "meta_val[\"pred_en\"] = pred_val_en\n",
+    "meta_val[\"pred_rf\"] = pred_val_rf\n",
+    "\n",
+    "meta_test = meta_test.copy()\n",
+    "meta_test[\"pred_en\"] = pred_test_en\n",
+    "meta_test[\"pred_rf\"] = pred_test_rf"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "bd2903f3",
+   "metadata": {},
+   "source": [
+    "For each month, stocks are sorted into decile portfolios based on predicted excess returns. Decile 0 contains the lowest predicted returns and decile 9 contains the highest predicted returns. Realized excess returns within each decile are computed as value-weighted averages using `mktcap_lag`."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 20,
+   "id": "5ae38fc0",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def assign_deciles(df, pred_col, decile_col):\n",
+    "    \"\"\"\n",
+    "    Assign stocks to decile portfolios each month based on predicted returns.\n",
+    "    Uses ranked predictions to avoid qcut dropping bins when many values are tied.\n",
+    "    \"\"\"\n",
+    "    df = df.copy()\n",
+    "\n",
+    "    def month_deciles(x):\n",
+    "        if x.notna().sum() < 10:\n",
+    "            return pd.Series(np.nan, index=x.index)\n",
+    "\n",
+    "        ranked = x.rank(method=\"first\")\n",
+    "        return pd.qcut(ranked, 10, labels=False)\n",
+    "\n",
+    "    df[decile_col] = df.groupby(\"date\")[pred_col].transform(month_deciles)\n",
+    "    df[decile_col] = pd.to_numeric(df[decile_col], errors=\"coerce\")\n",
+    "\n",
+    "    return df\n",
+    "\n",
+    "meta_val = assign_deciles(meta_val, \"pred_en\", \"decile_en\")\n",
+    "meta_val = assign_deciles(meta_val, \"pred_rf\", \"decile_rf\")\n",
+    "\n",
+    "meta_test = assign_deciles(meta_test, \"pred_en\", \"decile_en\")\n",
+    "meta_test = assign_deciles(meta_test, \"pred_rf\", \"decile_rf\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "78b09381",
+   "metadata": {},
+   "source": [
+    "The long-short strategy buys the top predicted-return decile and shorts the bottom predicted-return decile. The monthly long-short return is therefore the value-weighted return of decile 9 minus the value-weighted return of decile 0."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "id": "1b920f75",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def compute_longshort(df, decile_col):\n",
+    "    \"\"\"\n",
+    "    Compute monthly value-weighted long-short portfolio returns.\n",
+    "    Long = top decile (9), Short = bottom decile (0).\n",
+    "    Skips months where one of the legs is missing.\n",
+    "    \"\"\"\n",
+    "    results = []\n",
+    "\n",
+    "    for date, group in df.groupby(\"date\"):\n",
+    "        group = group.dropna(subset=[decile_col, \"ret_excess\", \"mktcap_lag\"])\n",
+    "\n",
+    "        long_leg = group[group[decile_col] == 9]\n",
+    "        short_leg = group[group[decile_col] == 0]\n",
+    "\n",
+    "        if len(long_leg) == 0 or len(short_leg) == 0:\n",
+    "            continue\n",
+    "\n",
+    "        if long_leg[\"mktcap_lag\"].sum() <= 0 or short_leg[\"mktcap_lag\"].sum() <= 0:\n",
+    "            continue\n",
+    "\n",
+    "        long_ret = np.average(long_leg[\"ret_excess\"], weights=long_leg[\"mktcap_lag\"])\n",
+    "        short_ret = np.average(short_leg[\"ret_excess\"], weights=short_leg[\"mktcap_lag\"])\n",
+    "        ls_ret = long_ret - short_ret\n",
+    "\n",
+    "        results.append({\n",
+    "            \"date\": date,\n",
+    "            \"long_ret\": long_ret,\n",
+    "            \"short_ret\": short_ret,\n",
+    "            \"ls_ret\": ls_ret\n",
+    "        })\n",
+    "\n",
+    "    out = pd.DataFrame(results)\n",
+    "\n",
+    "    if out.empty:\n",
+    "        raise ValueError(\n",
+    "            f\"No valid months found for {decile_col}. \"\n",
+    "            f\"Check whether both decile 0 and decile 9 exist in each month.\"\n",
+    "        )\n",
+    "\n",
+    "    out[\"date\"] = pd.to_datetime(out[\"date\"])\n",
+    "    return out.set_index(\"date\")\n",
+    "\n",
+    "ls_val_en  = compute_longshort(meta_val,  \"decile_en\")\n",
+    "ls_val_rf  = compute_longshort(meta_val,  \"decile_rf\")\n",
+    "\n",
+    "ls_test_en = compute_longshort(meta_test, \"decile_en\")\n",
+    "ls_test_rf = compute_longshort(meta_test, \"decile_rf\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "aa1b6bbe",
+   "metadata": {},
+   "source": [
+    "### Exercise 3d: Performance metrics\n",
+    "The market benchmark is constructed as the value-weighted average excess return across all stocks in the relevant sample. This makes the benchmark comparable to the long-short portfolio, since both returns are measured in excess of the risk-free rate. CAPM alpha is estimated by regressing the long-short portfolio excess return on the value-weighted market excess return.\n",
+    "\n",
+    "@tbl-performance reports annualized mean excess returns, Sharpe ratios, CAPM alphas, and alpha t-statistics for the long-short portfolios and the market benchmark. Elastic Net performs consistently across validation and test, with positive annualized returns and Sharpe ratios in both periods. Random Forest performs reasonably in validation but delivers negative test-period performance, suggesting that its predictive signal is less stable out-of-sample. The alpha t-statistics are below conventional significance levels, so the evidence for statistically significant abnormal returns is weak."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "id": "5ed83988",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/var/folders/4h/vr5_hhfs4p56g12szwg17pmr0000gn/T/ipykernel_15987/3036370527.py:32: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.\n",
+      "/var/folders/4h/vr5_hhfs4p56g12szwg17pmr0000gn/T/ipykernel_15987/3036370527.py:36: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.\n"
+     ]
+    }
+   ],
+   "source": [
+    "def portfolio_stats(ls_returns, market_returns=None):\n",
+    "    r = ls_returns[\"ls_ret\"]\n",
+    "    ann_mean = r.mean() * 12\n",
+    "    ann_sharpe = r.mean() / r.std() * np.sqrt(12)\n",
+    "\n",
+    "    if market_returns is not None:\n",
+    "        aligned = pd.concat([r, market_returns], axis=1).dropna()\n",
+    "        aligned.columns = [\"ls_ret\", \"mkt_excess_ret\"]\n",
+    "        X_capm = sm.add_constant(aligned[\"mkt_excess_ret\"])\n",
+    "        res = sm.OLS(aligned[\"ls_ret\"], X_capm).fit()\n",
+    "        alpha = res.params[\"const\"] * 12\n",
+    "        alpha_t = res.tvalues[\"const\"]\n",
+    "    else:\n",
+    "        alpha, alpha_t = np.nan, np.nan\n",
+    "\n",
+    "    return {\n",
+    "        \"ann_mean\": ann_mean,\n",
+    "        \"sharpe\": ann_sharpe,\n",
+    "        \"alpha\": alpha,\n",
+    "        \"alpha_t\": alpha_t\n",
+    "    }\n",
+    "\n",
+    "def market_stats(market_returns):\n",
+    "    r = market_returns.dropna()\n",
+    "    return {\n",
+    "        \"ann_mean\": r.mean() * 12,\n",
+    "        \"sharpe\": r.mean() / r.std() * np.sqrt(12),\n",
+    "        \"alpha\": np.nan,\n",
+    "        \"alpha_t\": np.nan\n",
+    "    }\n",
+    "\n",
+    "mkt_val = meta_val.groupby(\"date\").apply(\n",
+    "    lambda g: np.average(g[\"ret_excess\"], weights=g[\"mktcap_lag\"])\n",
+    ").rename(\"mkt_excess_ret\")\n",
+    "\n",
+    "mkt_test = meta_test.groupby(\"date\").apply(\n",
+    "    lambda g: np.average(g[\"ret_excess\"], weights=g[\"mktcap_lag\"])\n",
+    ").rename(\"mkt_excess_ret\")\n",
+    "\n",
+    "results_3d = [\n",
+    "    {\"Model\": \"Elastic Net\", \"Sample\": \"Validation\", **portfolio_stats(ls_val_en, mkt_val)},\n",
+    "    {\"Model\": \"Random Forest\", \"Sample\": \"Validation\", **portfolio_stats(ls_val_rf, mkt_val)},\n",
+    "    {\"Model\": \"Market\", \"Sample\": \"Validation\", **market_stats(mkt_val)},\n",
+    "    {\"Model\": \"Elastic Net\", \"Sample\": \"Test\", **portfolio_stats(ls_test_en, mkt_test)},\n",
+    "    {\"Model\": \"Random Forest\", \"Sample\": \"Test\", **portfolio_stats(ls_test_rf, mkt_test)},\n",
+    "    {\"Model\": \"Market\", \"Sample\": \"Test\", **market_stats(mkt_test)},\n",
+    "]\n",
+    "\n",
+    "results_3d_df = pd.DataFrame(results_3d)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "id": "tbl-performance",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/markdown": [
+       "| Model         | Sample     |   ann_mean |   sharpe |    alpha |   alpha_t |\n",
+       "|:--------------|:-----------|-----------:|---------:|---------:|----------:|\n",
+       "| Elastic Net   | Validation |     0.041  |   0.6976 |   0.0405 |    1.3369 |\n",
+       "| Random Forest | Validation |     0.0364 |   0.3143 |   0.0702 |    1.2036 |\n",
+       "| Market        | Validation |     0.1361 |   1.3293 | nan      |  nan      |\n",
+       "| Elastic Net   | Test       |     0.0641 |   0.7228 |   0.0449 |    1.0329 |\n",
+       "| Random Forest | Test       |    -0.0321 |  -0.1777 |  -0.0369 |   -0.4066 |\n",
+       "| Market        | Test       |     0.1748 |   1.0233 | nan      |  nan      |"
+      ],
+      "text/plain": [
+       "<IPython.core.display.Markdown object>"
+      ]
+     },
+     "execution_count": 22,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| label: tbl-performance\n",
+    "#| tbl-cap: Annualized long-short portfolio performance and market benchmark\n",
+    "Markdown(results_3d_df.round(4).to_markdown(index=False))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "077200c4",
+   "metadata": {},
+   "source": [
+    "### Exercise 3e: Portfolio turnover\n",
+    "@tbl-turnover reports average monthly turnover."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 24,
+   "id": "6a34b232",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def compute_turnover(df, decile_col):\n",
+    "    \"\"\"\n",
+    "    Monthly turnover: average fraction of long/short legs that changes each month.\n",
+    "    \"\"\"\n",
+    "    turnovers = []\n",
+    "    dates = sorted(df[\"date\"].unique())\n",
+    "\n",
+    "    for i in range(1, len(dates)):\n",
+    "        prev = df[df[\"date\"] == dates[i-1]]\n",
+    "        curr = df[df[\"date\"] == dates[i]]\n",
+    "\n",
+    "        prev_long  = set(prev[prev[decile_col] == 9.0][\"permno\"])\n",
+    "        curr_long  = set(curr[curr[decile_col] == 9.0][\"permno\"])\n",
+    "        prev_short = set(prev[prev[decile_col] == 0.0][\"permno\"])\n",
+    "        curr_short = set(curr[curr[decile_col] == 0.0][\"permno\"])\n",
+    "\n",
+    "        long_to  = len(prev_long  - curr_long)  / max(len(prev_long), 1)\n",
+    "        short_to = len(prev_short - curr_short) / max(len(prev_short), 1)\n",
+    "        turnovers.append((long_to + short_to) / 2)\n",
+    "\n",
+    "    return np.mean(turnovers)\n",
+    "\n",
+    "to_val_en  = compute_turnover(meta_val,  \"decile_en\")\n",
+    "to_val_rf  = compute_turnover(meta_val,  \"decile_rf\")\n",
+    "to_test_en = compute_turnover(meta_test, \"decile_en\")\n",
+    "to_test_rf = compute_turnover(meta_test, \"decile_rf\")\n",
+    "\n",
+    "turnover_df = pd.DataFrame({\n",
+    "    \"Model\": [\"Elastic Net\", \"Random Forest\"],\n",
+    "    \"Validation\": [to_val_en, to_val_rf],\n",
+    "    \"Test\": [to_test_en, to_test_rf]\n",
+    "})"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "id": "tbl-turnover",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/markdown": [
+       "| Model         |   Validation |   Test |\n",
+       "|:--------------|-------------:|-------:|\n",
+       "| Elastic Net   |       0.0073 | 0.0085 |\n",
+       "| Random Forest |       0.5418 | 0.5006 |"
+      ],
+      "text/plain": [
+       "<IPython.core.display.Markdown object>"
+      ]
+     },
+     "execution_count": 24,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| label: tbl-turnover\n",
+    "#| tbl-cap: Average monthly portfolio turnover\n",
+    "Markdown(turnover_df.round(4).to_markdown(index=False))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "d1a14ce4",
+   "metadata": {},
+   "source": [
+    "### Exercise 3f: Model comparison"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "id": "8f8475d7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "en_test = results_3d_df.query(\"Model == 'Elastic Net' and Sample == 'Test'\").iloc[0]\n",
+    "rf_test = results_3d_df.query(\"Model == 'Random Forest' and Sample == 'Test'\").iloc[0]\n",
+    "\n",
+    "en_turnover = turnover_df.query(\"Model == 'Elastic Net'\").iloc[0]\n",
+    "rf_turnover = turnover_df.query(\"Model == 'Random Forest'\").iloc[0]\n",
+    "\n",
+    "preferred_model = \"Elastic Net\" if en_test[\"sharpe\"] > rf_test[\"sharpe\"] else \"Random Forest\"\n",
+    "\n",
+    "en_return_sign = \"positive\" if en_test[\"ann_mean\"] > 0 else \"negative\"\n",
+    "rf_return_sign = \"positive\" if rf_test[\"ann_mean\"] > 0 else \"negative\"\n",
+    "\n",
+    "en_alpha_sign = \"positive\" if en_test[\"alpha\"] > 0 else \"negative\"\n",
+    "rf_alpha_sign = \"positive\" if rf_test[\"alpha\"] > 0 else \"negative\"\n",
+    "\n",
+    "turnover_relation = \"lower\" if en_turnover[\"Test\"] < rf_turnover[\"Test\"] else \"higher\""
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "665836a1",
+   "metadata": {
+    "user_expressions": [
+     {
+      "expression": "preferred_model",
+      "result": {
+       "data": {
+        "text/plain": "'Elastic Net'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "en_return_sign",
+      "result": {
+       "data": {
+        "text/plain": "'positive'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{en_test['ann_mean']*100:.2f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'6.41'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{en_test['sharpe']:.2f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'0.72'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "en_alpha_sign",
+      "result": {
+       "data": {
+        "text/plain": "'positive'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{en_test['alpha']*100:.2f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'4.49'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "rf_return_sign",
+      "result": {
+       "data": {
+        "text/plain": "'negative'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{rf_test['ann_mean']*100:.2f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'-3.21'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{rf_test['sharpe']:.2f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'-0.18'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "rf_alpha_sign",
+      "result": {
+       "data": {
+        "text/plain": "'negative'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{rf_test['alpha']*100:.2f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'-3.69'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "turnover_relation",
+      "result": {
+       "data": {
+        "text/plain": "'lower'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{en_turnover['Test']:.3f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'0.008'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     },
+     {
+      "expression": "f\"{rf_turnover['Test']:.3f}\"",
+      "result": {
+       "data": {
+        "text/plain": "'0.501'"
+       },
+       "metadata": {},
+       "status": "ok"
+      }
+     }
+    ]
+   },
+   "source": [
+    "For the selected hyperparameter specifications, `{python} preferred_model` is preferred from an investor perspective based on test-period risk-adjusted performance. In the test period, Elastic Net generates a `{python} en_return_sign` annualized mean return of `{python} f\"{en_test['ann_mean']*100:.2f}\"`%, a Sharpe ratio of `{python} f\"{en_test['sharpe']:.2f}\"`, and a `{python} en_alpha_sign` CAPM alpha of `{python} f\"{en_test['alpha']*100:.2f}\"`%. In comparison, Random Forest generates a `{python} rf_return_sign` annualized mean return of `{python} f\"{rf_test['ann_mean']*100:.2f}\"`%, a Sharpe ratio of `{python} f\"{rf_test['sharpe']:.2f}\"`, and a `{python} rf_alpha_sign` CAPM alpha of `{python} f\"{rf_test['alpha']*100:.2f}\"`%.\n",
+    "\n",
+    "@tbl-turnover shows that Elastic Net has `{python} turnover_relation` turnover than Random Forest in the test period. Elastic Net turnover is `{python} f\"{en_turnover['Test']:.3f}\"`, compared with `{python} f\"{rf_turnover['Test']:.3f}\"` for Random Forest. This matters because high turnover increases transaction costs and can erode gross portfolio returns.\n",
+    "\n",
+    "Overall, Elastic Net provides the better trade-off between risk-adjusted performance, alpha, and implementability in our sample.\n",
+    "\n",
+    "\n",
+    "## Exercise 4\n",
+    "### Exercise 4a: Variable importance\n",
+    "\n",
+    "Variable importance is measured as the drop in annualized test Sharpe ratio when one predictor is set to a reference value and the long-short portfolio is rebuilt. For standardized continuous predictors, the reference value is zero, corresponding to the training-sample mean after standardization. For industry dummies, the reference value is set to the test-sample mean."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "id": "30b16440",
+   "metadata": {
+    "cache": true
+   },
+   "outputs": [],
+   "source": [
+    "# baseline test Sharpe ratios from exercise 3\n",
+    "baseline_sharpe_en = ls_test_en[\"ls_ret\"].mean() / ls_test_en[\"ls_ret\"].std() * np.sqrt(12)\n",
+    "baseline_sharpe_rf = ls_test_rf[\"ls_ret\"].mean() / ls_test_rf[\"ls_ret\"].std() * np.sqrt(12)\n",
+    "\n",
+    "# reference values:\n",
+    "# standardized continuous predictors -> 0\n",
+    "# industry dummies -> mean in the test set\n",
+    "reference_values = {\n",
+    "    col: 0.0 if col in continuous_features else X_test[col].mean()\n",
+    "    for col in X_test.columns\n",
+    "}\n",
+    "\n",
+    "def variable_importance_sharpe_drop(\n",
+    "    model,\n",
+    "    X_test,\n",
+    "    meta_test,\n",
+    "    pred_col,\n",
+    "    decile_col,\n",
+    "    baseline_sharpe,\n",
+    "    reference_values\n",
+    "):\n",
+    "    \"\"\"\n",
+    "    Measure variable importance as the drop in annualized test Sharpe ratio\n",
+    "    when one predictor is set to a reference value and the portfolio is rebuilt.\n",
+    "    \"\"\"\n",
+    "    results = []\n",
+    "\n",
+    "    for feature in X_test.columns:\n",
+    "        X_mod = X_test.copy()\n",
+    "        X_mod[feature] = reference_values[feature]\n",
+    "\n",
+    "        tmp = meta_test.copy()\n",
+    "        tmp[pred_col] = model.predict(X_mod)\n",
+    "        tmp = assign_deciles(tmp, pred_col, decile_col)\n",
+    "\n",
+    "        ls_tmp = compute_longshort(tmp, decile_col)\n",
+    "        perturbed_sharpe = ls_tmp[\"ls_ret\"].mean() / ls_tmp[\"ls_ret\"].std() * np.sqrt(12)\n",
+    "\n",
+    "        results.append({\n",
+    "            \"feature\": feature,\n",
+    "            \"sharpe_drop\": baseline_sharpe - perturbed_sharpe\n",
+    "        })\n",
+    "\n",
+    "    return (\n",
+    "        pd.DataFrame(results)\n",
+    "        .sort_values(\"sharpe_drop\", ascending=False)\n",
+    "        .reset_index(drop=True)\n",
+    "    )\n",
+    "\n",
+    "vi_en = variable_importance_sharpe_drop(\n",
+    "    final_en,\n",
+    "    X_test,\n",
+    "    meta_test,\n",
+    "    \"pred_en_vi\",\n",
+    "    \"decile_en_vi\",\n",
+    "    baseline_sharpe_en,\n",
+    "    reference_values\n",
+    ")\n",
+    "\n",
+    "vi_rf = variable_importance_sharpe_drop(\n",
+    "    final_rf,\n",
+    "    X_test,\n",
+    "    meta_test,\n",
+    "    \"pred_rf_vi\",\n",
+    "    \"decile_rf_vi\",\n",
+    "    baseline_sharpe_rf,\n",
+    "    reference_values\n",
+    ")\n",
+    "\n",
+    "top3_en = vi_en.head(3).copy()\n",
+    "top3_en[\"model\"] = \"Elastic Net\"\n",
+    "\n",
+    "top3_rf = vi_rf.head(3).copy()\n",
+    "top3_rf[\"model\"] = \"Random Forest\"\n",
+    "\n",
+    "top3_importance = pd.concat([top3_en, top3_rf], ignore_index=True)\n",
+    "top3_importance = top3_importance[[\"model\", \"feature\", \"sharpe_drop\"]]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "id": "tbl-variable-importance",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/markdown": [
+       "| model         | feature                           |   sharpe_drop |\n",
+       "|:--------------|:----------------------------------|--------------:|\n",
+       "| Elastic Net   | characteristic_mom1m              |        0      |\n",
+       "| Elastic Net   | characteristic_mom12m             |        0      |\n",
+       "| Elastic Net   | characteristic_mvel1              |        0      |\n",
+       "| Random Forest | characteristic_ep_x_macro_bm      |        0.4633 |\n",
+       "| Random Forest | characteristic_retvol_x_macro_tbl |        0.2944 |\n",
+       "| Random Forest | characteristic_mvel1_x_macro_dfy  |        0.2885 |"
+      ],
+      "text/plain": [
+       "<IPython.core.display.Markdown object>"
+      ]
+     },
+     "execution_count": 27,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "#| label: tbl-variable-importance\n",
+    "#| tbl-cap: Top predictors by Sharpe-ratio drop in the test sample\n",
+    "Markdown(top3_importance.round(4).to_markdown(index=False))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "56faaee2",
+   "metadata": {},
+   "source": [
+    "This portfolio-based importance measure evaluates whether a predictor matters for the final investment strategy rather than only for return prediction accuracy. A larger Sharpe-ratio drop indicates that removing the information in that predictor reduces the economic value of the model.\n",
+    "\n",
+    "\n",
+    "### Exercise 4b: Ranking comparison\n",
+    "The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.\n",
+    "\n",
+    "\n",
+    "### Exercise 4c: Findings to financial theory\n",
+    "The Random Forest importance results suggest that portfolio performance is mainly driven by state-dependent valuation, volatility, and size effects. The largest Sharpe-ratio drop comes from `characteristic_ep_x_macro_bm`, indicating that the predictive value of earnings-to-price depends on aggregate book-to-market conditions. This is consistent with value-based return predictability varying across market valuation states.\n",
+    "\n",
+    "The other top predictors, `characteristic_retvol_x_macro_tbl` and `characteristic_mvel1_x_` `macro_dfy`, suggest that volatility and size effects depend on interest rate conditions and credit risk. In contrast, Elastic Net produces near-zero importance scores, consistent with its strongly regularized linear structure. Overall, the results indicate that the Random Forest model extracts economic value primarily from nonlinear and macro-dependent interactions.\n",
+    "\n",
+    "## For Assignment 3"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "id": "e4fff080",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "['ma2_random_forest_bundle.joblib']"
+      ]
+     },
+     "execution_count": 28,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "ma2_elastic_net_bundle = {\n",
+    "    \"model\": final_en,\n",
+    "    \"scaler\": scaler,\n",
+    "    \"feature_columns\": list(X_train.columns),\n",
+    "    \"continuous_features\": continuous_features,\n",
+    "    \"stock_chars\": stock_chars,\n",
+    "    \"macro_vars\": macro_vars,\n",
+    "    \"dummy_features\": dummy_features,\n",
+    "}\n",
+    "\n",
+    "ma2_random_forest_bundle = {\n",
+    "    \"model\": final_rf,\n",
+    "    \"scaler\": scaler,\n",
+    "    \"feature_columns\": list(X_train.columns),\n",
+    "    \"continuous_features\": continuous_features,\n",
+    "    \"stock_chars\": stock_chars,\n",
+    "    \"macro_vars\": macro_vars,\n",
+    "    \"dummy_features\": dummy_features,\n",
+    "}\n",
+    "\n",
+    "joblib.dump(ma2_elastic_net_bundle, \"ma2_elastic_net_bundle.joblib\")\n",
+    "joblib.dump(ma2_random_forest_bundle, \"ma2_random_forest_bundle.joblib\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3",
+   "path": "/Users/AstridMoeller/Documents/GitHub/AEF-git/.venv/share/jupyter/kernels/python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.15"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
