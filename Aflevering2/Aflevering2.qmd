@@ -337,8 +337,11 @@ split_summary
 Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.
 
 ### Exercise 2c: Hyperparameter tuning
-Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the mean squared prediction error objective in @Gu.2020. For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, we vary tree depth while keeping the number of trees, feature subsampling rule, and minimum leaf size fixed. This allows us to examine how increasing model complexity affects predictive accuracy while keeping computation feasible.
+Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the prediction-error objective in @Gu.2020.
 
+For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, we use a computationally constrained grid and focus tuning on tree depth, while keeping the number of trees, feature subsampling rule, and minimum leaf size fixed. This allows us to examine how increasing model complexity affects predictive accuracy while keeping computation feasible.
+
+Figure @fig-tuning-rmse shows how training and validation RMSE vary across the tuned hyperparameters. For Elastic Net, the lines are almost overlapping, indicating limited sensitivity to l1_ratio in this grid. For Random Forest, deeper trees slightly improve training fit, while validation RMSE remains nearly flat.
 
 ```{python}
 #| cache: true
@@ -408,8 +411,77 @@ best_rf_params = rf_results_df.iloc[0][
 
 ```
 
-The model selection is shown in @tbl-model-selection. The final specification for each model is selected as the one with the lowest validation RMSE. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
+```{python}
+#| cache: true
+#| label: fig-tuning-rmse
+#| fig-cap: "Training and validation RMSE across model complexity"
 
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+# Elastic Net: RMSE by alpha and l1_ratio
+for l1 in sorted(en_results_df["l1_ratio"].unique()):
+    subset = en_results_df[en_results_df["l1_ratio"] == l1].sort_values("alpha")
+
+    axes[0].plot(
+        subset["alpha"],
+        subset["train_rmse"],
+        marker="o",
+        linestyle="-",
+        label=f"Train, l1_ratio={l1}"
+    )
+
+    axes[0].plot(
+        subset["alpha"],
+        subset["val_rmse"],
+        marker="o",
+        linestyle="--",
+        label=f"Validation, l1_ratio={l1}"
+    )
+
+axes[0].set_xscale("log")
+axes[0].set_title("Elastic Net")
+axes[0].set_xlabel("Penalty strength (alpha)")
+axes[0].set_ylabel("RMSE")
+axes[0].legend(fontsize=7)
+
+# Random Forest: RMSE by max_depth
+rf_plot = (
+    rf_results_df
+    .groupby("max_depth")[["train_rmse", "val_rmse"]]
+    .mean()
+    .reset_index()
+    .sort_values("max_depth")
+)
+
+axes[1].plot(
+    rf_plot["max_depth"],
+    rf_plot["train_rmse"],
+    marker="o",
+    linestyle="-",
+    label="Train RMSE"
+)
+
+axes[1].plot(
+    rf_plot["max_depth"],
+    rf_plot["val_rmse"],
+    marker="o",
+    linestyle="--",
+    label="Validation RMSE"
+)
+
+axes[1].set_title("Random Forest")
+axes[1].set_xlabel("Tree depth")
+axes[1].set_ylabel("RMSE")
+axes[1].legend(fontsize=8)
+
+plt.tight_layout()
+plt.show()
+```
+
+
+The final specification for each model is selected as the one with the lowest validation RMSE, as reported in @tbl-model-selection.  Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
 
 ```{python}
 #| cache: true
