@@ -47,63 +47,97 @@ plt.rcParams.update({
 ```
 
 ## Exercise 1 – Investment Universe
-
-We construct the investment universe from the CRSP monthly dataset. Following the assignment, we retain stocks from January 1980 onward with prices above $2 and market capitalisation above the 20th NYSE size percentile in each month. The breakpoint is calculated using NYSE stocks and applied to the full sample, excluding small and illiquid stocks that are difficult to trade and tend to have noisier return data.
+We construct the investment universe from the CRSP monthly dataset. Following the assignment, we retain stocks from January 1980 onward with prices above $2 and market capitalisation above the 20th NYSE size percentile in each month. The breakpoint is calculated using NYSE stocks and applied to the full sample. These filters exclude small and illiquid stocks that are difficult to trade and tend to have noisier return data.
 
 ```{python}
 # Data file is stored locally (too large for the GitHub repository), so we
 # point directly to its absolute path on disk.
-DATA_FILE = "/Users/AstridMoeller/AEF/data/crsp_monthly.parquet"
+DATA_FILE = "/Users/esmeraldalarsson/Desktop/crsp_monthly.parquet"
 
 df_raw = pd.read_parquet(DATA_FILE)
 df_raw["date"] = pd.to_datetime(df_raw["date"])
 df_raw = df_raw.sort_values(["permno", "date"]).reset_index(drop=True)
 
+# Clean returns and prices
 df_raw["ret"] = pd.to_numeric(df_raw["ret"], errors="coerce")
 df_raw.loc[df_raw["ret"] < -1, "ret"] = np.nan
 df_raw["ret_excess"] = pd.to_numeric(df_raw["ret_excess"], errors="coerce")
 df_raw["prc"] = df_raw["prc"].abs()
 
+# Keep observations from January 1980 onward
 df = df_raw[df_raw["date"] >= "1980-01-01"].copy()
-nyse_p20 = (df[df["exchange"] == "NYSE"]
-            .groupby("date")["mktcap"]
-            .quantile(0.20)
-            .rename("nyse_p20"))
+
+# Compute the monthly 20th NYSE size percentile
+nyse_p20 = (
+    df[df["exchange"] == "NYSE"]
+    .groupby("date")["mktcap"]
+    .quantile(0.20)
+    .rename("nyse_p20")
+)
+
 df = df.join(nyse_p20, on="date")
-mask = (df["prc"] > 2) & (df["mktcap"] >= df["nyse_p20"]) & df["ret"].notna()
-df_filtered = df[mask].copy()
+
+# Apply assignment filters
+mask = (
+    (df["prc"] > 2)
+    & (df["mktcap"] >= df["nyse_p20"])
+    & df["ret"].notna()
+)
+
+# Full filtered investment universe
+df_universe = df[mask].copy()
+
+n_per_month_full = df_universe.groupby("date")["permno"].nunique()
+avg_n_full = n_per_month_full.mean()
+min_n_full = n_per_month_full.min()
+max_n_full = n_per_month_full.max()
 ```
 
+After applying the CRSP filters, the full filtered universe contains on average `{python} f"{avg_n_full:.0f}"` stocks per month, with a minimum of `{python} f"{min_n_full}"` and a maximum of `{python} f"{max_n_full}"`.
+For computational tractability in the subsequent portfolio optimisation exercises, we draw a fixed random subsample of 600 stocks from the filtered universe and use this sample throughout the backtest. This reduces the dimensionality of the covariance estimation and portfolio optimisation problem while keeping the stock selection reproducible through a fixed random seed.
+
 ```{python}
-# Restrict to a fixed random subsample of stocks for computational
+# We restrict to a fixed random subsample of stocks for computational
 # tractability (see discussion below), in the same spirit as the bootstrap
 # of Hautsch and Voigt (2019), who draw N=250 out of 308 available assets
 # for an analogous reason.
 MAX_UNIVERSE_SIZE = 600
 np.random.seed(42)
-all_permnos = df_filtered["permno"].unique()
-if len(all_permnos) > MAX_UNIVERSE_SIZE:
-    keep_permnos = np.random.choice(all_permnos, size=MAX_UNIVERSE_SIZE, replace=False)
-    df_filtered = df_filtered[df_filtered["permno"].isin(keep_permnos)].copy()
 
-n_per_month = df_filtered.groupby("date")["permno"].count()
+all_permnos = df_universe["permno"].unique()
+
+if len(all_permnos) > MAX_UNIVERSE_SIZE:
+    keep_permnos = np.random.choice(
+        all_permnos,
+        size=MAX_UNIVERSE_SIZE,
+        replace=False
+    )
+    df_filtered = df_universe[df_universe["permno"].isin(keep_permnos)].copy()
+else:
+    df_filtered = df_universe.copy()
+
+# Universe actually used in the portfolio backtest
+n_per_month = df_filtered.groupby("date")["permno"].nunique()
 avg_n = n_per_month.mean()
+min_n = n_per_month.min()
+max_n = n_per_month.max()
 ```
 
-To keep the portfolio optimisation computationally feasible, we draw a fixed random subsample of `{python} f"{MAX_UNIVERSE_SIZE}"` stocks from the filtered universe and use this sample throughout the analysis. Using a fixed seed ensures that the same set of stocks is followed over time.
-
-@fig-universe-size shows the evolution of the investment universe over time. After filtering and subsampling, the universe contains on average `{python} f"{avg_n:.0f}"` stocks per month, with a minimum of `{python} f"{n_per_month.min()}"` and a maximum of `{python} f"{n_per_month.max()}"`.
+After subsampling, the backtest universe contains on average `{python} f"{avg_n:.0f}"` stocks per month, with a minimum of `{python} f"{min_n}"` and a maximum of `{python} f"{max_n}"`. Thus, we report the full filtered CRSP universe required by the assignment, while the remaining analysis is performed on the fixed subsample. @fig-universe-size shows the evolution of the number of stocks used in the portfolio backtest over time.
 
 ```{python}
 #| label: fig-universe-size
 #| fig-cap: "Investment universe size after CRSP filters and fixed subsampling."
+
+#| label: fig-universe-size
+#| fig-cap: "Backtest universe size after CRSP filters and fixed subsampling."
 
 fig, ax = plt.subplots(figsize=(6.5, 2.4))
 n_per_month.plot(ax=ax, color="steelblue", linewidth=0.8)
 ax.axhline(avg_n, color="red", linestyle="--", linewidth=0.8, label=f"Average = {avg_n:.0f}")
 ax.set_xlabel("Date")
 ax.set_ylabel("Number of stocks")
-ax.set_title("Investment Universe Size (post-filters)")
+ax.set_title("Backtest Universe Size")
 ax.legend()
 plt.tight_layout()
 plt.savefig("fig_universe_size.pdf", bbox_inches="tight")
@@ -153,14 +187,15 @@ $$
 
 This is a convex combination — since $\alpha + (1-\alpha) = 1$ and both terms lie in $(0,1)$ for any $\lambda,\gamma>0$ — between the unconstrained mean-variance portfolio and the current, pre-rebalancing holding $\omega_t^+$.
 
-The parameter $\lambda$ governs how much weight the optimal portfolio places on these two extremes. As $\lambda\to 0$, the investor disregards transaction costs entirely and fully rebalances to the unconstrained efficient portfolio every period. As $\lambda\to\infty$, the optimal portfolio collapses to the no-trade position $\omega_t^+$, since any rebalancing becomes prohibitively costly. For intermediate values, $\lambda$ controls the speed of mean-reversion towards the efficient frontier, effectively acting as a regulariser that shrinks the optimal allocation towards the investor's current holdings. This is exactly analogous to the covariance-shrinkage interpretation of quadratic transaction costs derived in Hautsch and Voigt (2019, eq. 4): in their framework, $\lambda$ inflates the eigenvalues of the covariance matrix used in the optimisation, whereas here the same parameter blends the new optimal allocation with the old one — two different but mathematically related mechanisms by which transaction costs regularise the portfolio choice problem.
+The parameter $\lambda$ determines how strongly the optimal portfolio is pulled towards the current holdings $\omega_t^+$. When $\lambda \to 0$, transaction costs become negligible and the investor fully rebalances to the unconstrained mean-variance portfolio. In contrast, when $\lambda \to \infty$, rebalancing becomes prohibitively expensive and the investor remains at the no-trade position $\omega_t^+$. For intermediate values, $\lambda$ acts as a regularization parameter that reduces portfolio turnover by shrinking the optimal allocation towards current holdings. This is consistent with the intuition in Hautsch and Voigt (2019), where transaction costs discourage large portfolio adjustments and thereby regularize the portfolio choice problem.
+
 
 ### 2b – Realism of Variance-Proportional Transaction Costs
 Modelling transaction costs as $\lambda(\omega-\omega_t^+)'\hat\Sigma_t(\omega-\omega_t^+)$ implies that rebalancing costs depend on both asset volatility and covariance. Consequently, trading volatile stocks becomes more expensive, which is plausible since bid-ask spreads and price impact tend to be larger for riskier securities.
 
-However, this specification is not fully realistic. Empirical studies (Tóth et al., 2011; Engle, Ferstenberg and Russell, 2012) generally find that transaction costs are more closely related to turnover than to the covariance structure of the portfolio. A flat proportional cost, such as the 50 basis points per unit of turnover commonly used in the literature and by Hautsch and Voigt (2019), therefore provides a more realistic approximation.
+However, this specification is not fully realistic. Empirical studies (Tóth et al., 2011; Engle, Ferstenberg and Russell, 2012) generally find that transaction costs are more closely related to turnover, liquidity, and market impact than to the covariance structure of the portfolio itself.
 
-The covariance-proportional specification is best viewed as an analytically convenient approximation. It yields a closed-form solution but may over-penalise trading in high-volatility periods and under-penalise it in calmer market conditions relative to a flat proportional cost.
+The covariance-proportional specification is therefore best viewed as an analytically convenient approximation. It yields a closed-form solution and makes the effect of transaction costs easy to analyse, but it could over penalise trading in high-volatility periods and under penalise it in calmer market conditions relative to actual trading costs.
 
 ### 2c – Implementation
 
@@ -315,7 +350,7 @@ Because characteristics observed in month $t$ are used to predict returns in mon
 MU_SHRINK = 0.05  # shrinkage applied ONLY to the historical-mean fallback (see text)
 
 # ---- Load the fitted MA2 bundle (Elastic Net: preferred model in MA2) ----
-MA2_BUNDLE_PATH = "/Users/AstridMoeller/Documents/GitHub/AEF-git/Aflevering2/ma2_elastic_net_bundle.joblib"
+MA2_BUNDLE_PATH = "/Users/esmeraldalarsson/Documents/GitHub/AEF-git/Aflevering2/ma2_elastic_net_bundle.joblib"
 bundle          = joblib.load(MA2_BUNDLE_PATH)
 ma2_model       = bundle["model"]
 ma2_scaler      = bundle["scaler"]
@@ -325,7 +360,7 @@ stock_chars     = bundle["stock_chars"]
 macro_vars      = bundle["macro_vars"]
 
 # ---- Load the characteristics panel MA2 was built from (same Absalon file) ----
-CHARS_FILE = "/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet"
+CHARS_FILE = "/Users/esmeraldalarsson/Desktop/stock_characteristics_monthly.parquet"
 chars = pd.read_parquet(CHARS_FILE)
 chars["date"] = pd.to_datetime(chars["date"])
 chars = chars[["permno", "date", "sic2"] + stock_chars + macro_vars].copy()
