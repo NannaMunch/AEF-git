@@ -58,7 +58,7 @@ For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.20
 
 ```{python}
 #| cache: false
-df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
+df = pd.read_parquet("/Users/esmeraldalarsson/Desktop/stock_characteristics_monthly.parquet")
 
 # keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
@@ -244,9 +244,23 @@ feature_count = pd.DataFrame({
 
 ## Exercise 2
 ### Exercise 2a: Model descriptions
-**Elastic Net** is a penalized linear regression model that combines the variable selection property of the Lasso with the coefficient shrinkage of Ridge regression. It is useful in our setting because the feature matrix contains many correlated predictors, including characteristic-macro interactions. The model minimizes prediction error while penalizing large coefficients, which helps reduce overfitting.
+**Elastic Net** is a penalized linear regression model that combines the variable selection property of the Lasso with the coefficient shrinkage of Ridge regression. It is well suited to our setting because the feature matrix contains many correlated predictors. The model minimizes the penalized mean squared error
 
-The key hyperparameters are the overall penalty strength (`alpha`) and the mixing parameter (`l1_ratio`). A higher `alpha` implies stronger regularization, while `l1_ratio` controls the balance between Lasso and Ridge. When `l1_ratio = 1`, the model corresponds to the Lasso; when `l1_ratio = 0`, it corresponds to Ridge regression.
+$$
+\hat{\beta}
+=
+\arg\min_{\beta}
+\frac{1}{n}\|y-X\beta\|_2^2
++
+\lambda
+\left[
+\alpha \|\beta\|_1
++
+\frac{1-\alpha}{2}\|\beta\|_2^2
+\right]
+$$
+
+The first term measures prediction error, while the second term combines the Lasso ($L_1$) and Ridge ($L_2$) penalties. In the sklearn implementation, the tuning hyperparameters are alpha, which controls the overall regularization strength, and l1_ratio, which determines the balance between Lasso and Ridge.
 
 **Random Forest** is a nonlinear tree-based ensemble model. It builds many regression trees on different bootstrap samples of the data and averages their predictions. Each tree recursively splits the feature space into groups with similar realized excess returns. Averaging across trees reduces the instability of individual decision trees and helps improve out-of-sample performance.
 
