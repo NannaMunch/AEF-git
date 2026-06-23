@@ -115,10 +115,31 @@ summary_table
 ```{=latex}
 \endgroup
 ```
+We first inspect missing values across the selected stock-level characteristics, macroeconomic variables, the prediction target, lagged market capitalization, and industry classification. In the current sample, no missing values are observed in these variables, and the cleaning procedure therefore does not reduce the number of observations.
 
-Missing stock characteristics are imputed using the monthly cross-sectional median. This preserves the number of stock-month observations while using only contemporaneous information from the same month. The median is preferred to the mean because it is less sensitive to extreme firm-level observations, which are common in financial data.
+As a safeguard and to ensure a consistent preprocessing pipeline, missing values in stock-level characteristics are handled using monthly cross-sectional median imputation. This approach would preserve stock-month observations while relying only on contemporaneous information from the same month. The median is preferred to the mean because it is less sensitive to extreme firm-level observations, which are common in financial data.
 
-Macroeconomic variables are common to all firms in a given month and vary only over time. Missing macro values are therefore filled forward and backward to preserve the time series of aggregate state variables. Finally, observations with missing excess returns or lagged market capitalization are dropped because `ret_excess` is the prediction target and `mktcap_lag` is required to construct value-weighted portfolio returns.
+Macroeconomic variables are common to all firms within a given month and vary only over time. Since no missing macroeconomic values are observed in the current sample, no macro imputation is required. Nevertheless, the preprocessing pipeline applies forward filling if missing macroeconomic values are encountered, so that only previously observed macroeconomic information is used. Backward filling is avoided to prevent look-ahead bias.
+
+Finally, observations with missing excess returns or lagged market capitalization would be dropped if present because `ret_excess` is the prediction target and `mktcap_lag` is required to construct value-weighted portfolio returns.
+
+```{python}
+# define variables to check
+vars_to_check = stock_chars + macro_vars + ["ret_excess", "mktcap_lag", "sic2"]
+
+# sample size before cleaning
+n_obs_before = len(df)
+n_firms_before = df["permno"].nunique()
+n_months_before = df["date"].nunique()
+
+# check missing values before cleaning
+missing_before = pd.DataFrame({
+    "missing_count": df[vars_to_check].isna().sum(),
+    "missing_share": df[vars_to_check].isna().mean()
+}).sort_values("missing_share", ascending=False)
+
+missing_before
+```
 
 ```{python}
 # impute stock characteristics with monthly cross-sectional medians
@@ -126,14 +147,22 @@ for col in stock_chars:
     df[col] = df.groupby("date")[col].transform(lambda x: x.fillna(x.median()))
 
 # fill macro variables over time
-df[macro_vars] = df[macro_vars].ffill().bfill()
+df[macro_vars] = df[macro_vars].ffill()
 
 # drop rows missing target or portfolio weight variable
 df = df.dropna(subset=["ret_excess", "mktcap_lag"]).copy()
 ```
 
+```{python}
+n_obs_final = len(df)
+n_firms_final = df["permno"].nunique()
+n_months_final = df["date"].nunique()
+```
 
-We recode `sic2` into the 10 major SIC divisions to retain broad industry information while keeping the feature space manageable. This reduces the number of industry dummy variables and lowers the risk that sparse industry categories create noisy predictors in the machine learning models.
+After cleaning, the final sample contains `{python} f"{n_obs_final:,}"` stock-month observations across `{python} f"{n_firms_final:,}"` firms and `{python} n_months_final` months. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.
+
+### 1c: Feature matrix construction
+First, we recode `sic2` into the 10 major SIC divisions to retain broad industry information while keeping the feature space manageable. This reduces the number of industry dummy variables and lowers the risk that sparse industry categories create noisy predictors in the machine learning models.
 
 ```{python}
 def recode_sic(sic):
@@ -164,16 +193,8 @@ def recode_sic(sic):
 df["sic_division"] = df["sic2"].apply(recode_sic)
 ```
 
-```{python}
-n_obs_final = len(df)
-n_firms_final = df["permno"].nunique()
-n_months_final = df["date"].nunique()
-```
+Then, we construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
 
-After cleaning, the final sample contains `{python} f"{n_obs_final:,}"` stock-month observations across `{python} f"{n_firms_final:,}"` firms and `{python} n_months_final` months. The missing-value treatment balances data retention with robustness, while the industry recoding keeps the dimensionality of the feature matrix manageable.
-
-### 1c: Feature matrix construction
-We construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
 ```{python}
 # create stock characteristic × macro interactions
 interaction_cols = []
