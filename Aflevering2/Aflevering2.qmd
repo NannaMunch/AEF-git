@@ -58,7 +58,7 @@ For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.20
 
 ```{python}
 #| cache: false
-df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
+df = pd.read_parquet("/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Mandatory assignment 2/stock_characteristics_monthly.parquet")
 
 # keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
@@ -673,6 +673,8 @@ turnover_df = pd.DataFrame({
 Markdown(turnover_df.round(4).to_markdown(index=False))
 ```
 
+@tbl-turnover shows that Elastic Net has lower turnover than Random Forest in the test period. Elastic Net turnover is `{python} f"{en_turnover['Test']:.3f}"`, compared with `{python} f"{rf_turnover['Test']:.3f}"` for Random Forest. This matters because high turnover increases transaction costs and can erode gross portfolio returns. Random Forest's turnover of around 50% per month implies substantial trading costs that would further reduce its already negative test-period return, whereas Elastic Net's turnover below 1% means its positive return is largely unaffected by trading frictions.
+
 ### Exercise 3f: Model comparison
 ```{python}
 en_test = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Test'").iloc[0]
@@ -693,8 +695,6 @@ turnover_relation = "lower" if en_turnover["Test"] < rf_turnover["Test"] else "h
 ```
 
 For the selected hyperparameter specifications, `{python} preferred_model` is preferred from an investor perspective based on test-period risk-adjusted performance. In the test period, Elastic Net generates a `{python} en_return_sign` annualized mean return of `{python} f"{en_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{en_test['sharpe']:.2f}"`, and a `{python} en_alpha_sign` CAPM alpha of `{python} f"{en_test['alpha']*100:.2f}"`%. In comparison, Random Forest generates a `{python} rf_return_sign` annualized mean return of `{python} f"{rf_test['ann_mean']*100:.2f}"`%, a Sharpe ratio of `{python} f"{rf_test['sharpe']:.2f}"`, and a `{python} rf_alpha_sign` CAPM alpha of `{python} f"{rf_test['alpha']*100:.2f}"`%.
-
-@tbl-turnover shows that Elastic Net has `{python} turnover_relation` turnover than Random Forest in the test period. Elastic Net turnover is `{python} f"{en_turnover['Test']:.3f}"`, compared with `{python} f"{rf_turnover['Test']:.3f}"` for Random Forest. This matters because high turnover increases transaction costs and can erode gross portfolio returns.
 
 Overall, Elastic Net provides the better trade-off between risk-adjusted performance, alpha, and implementability in our sample.
 
