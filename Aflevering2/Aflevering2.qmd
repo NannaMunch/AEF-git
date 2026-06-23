@@ -38,6 +38,7 @@ import tidyfinance as tf
 # plotting
 from plotnine import *
 from mizani.formatters import percent_format
+from IPython.display import Markdown
 
 # statistical models
 import statsmodels.api as sm
@@ -57,7 +58,7 @@ For the macroeconomic state variables from @Goyal.2008 library, we follow @Gu.20
 
 ```{python}
 #| cache: false
-df = pd.read_parquet("/Users/esmeraldalarsson/Desktop/stock_characteristics_monthly.parquet")
+df = pd.read_parquet("/Users/AstridMoeller/AEF/data/stock_characteristics_monthly.parquet")
 
 # keep observations from January 2000 onward
 df["date"] = pd.to_datetime(df["date"])
@@ -402,7 +403,7 @@ selected_results = pd.DataFrame({
     ]
 }).round(6)
 
-selected_results.style.hide(axis="index")
+Markdown(selected_results.round(6).to_markdown(index=False))
 ```
 
 
@@ -587,7 +588,7 @@ results_3d_df = pd.DataFrame(results_3d)
 ```{python}
 #| label: tbl-performance
 #| tbl-cap: "Annualized long-short portfolio performance and market benchmark"
-results_3d_df.round(4).style.hide(axis="index")
+Markdown(results_3d_df.round(4).to_markdown(index=False))
 ```
 
 ### Exercise 3e: Portfolio turnover
@@ -630,8 +631,7 @@ turnover_df = pd.DataFrame({
 ```{python}
 #| label: tbl-turnover
 #| tbl-cap: "Average monthly portfolio turnover"
-
-turnover_df.round(4).style.hide(axis="index")
+Markdown(turnover_df.round(4).to_markdown(index=False))
 ```
 
 ### Exercise 3f: Model comparison
@@ -750,7 +750,7 @@ top3_importance = top3_importance[["model", "feature", "sharpe_drop"]]
 ```{python}
 #| label: tbl-variable-importance
 #| tbl-cap: "Top predictors by Sharpe-ratio drop in the test sample"
-top3_importance.round(4).style.hide(axis="index")
+Markdown(top3_importance.round(4).to_markdown(index=False))
 ```
 
 This portfolio-based importance measure evaluates whether a predictor matters for the final investment strategy rather than only for return prediction accuracy. A larger Sharpe-ratio drop indicates that removing the information in that predictor reduces the economic value of the model.
