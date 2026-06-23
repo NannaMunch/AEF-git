@@ -39,6 +39,7 @@ import tidyfinance as tf
 from plotnine import *
 from mizani.formatters import percent_format
 from IPython.display import Markdown
+import matplotlib.pyplot as plt
 
 # statistical models
 import statsmodels.api as sm
@@ -193,7 +194,9 @@ def recode_sic(sic):
 df["sic_division"] = df["sic2"].apply(recode_sic)
 ```
 
-Then, we construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
+Then, we construct the feature matrix using the selected stock characteristics and their interactions with macroeconomic state variables. The feature matrix contains 59 predictors: 10 stock characteristics, 40 characteristic-macro interactions, and 9 industry dummies. 
+
+The interaction terms allow firm-level return predictability to vary with macroeconomic conditions, consistent with @Gu.2020. One SIC division is omitted as the reference category when constructing industry dummies.
 
 ```{python}
 # create stock characteristic × macro interactions
@@ -243,7 +246,7 @@ feature_count = pd.DataFrame({
 ```
 
 ## Exercise 2
-### Exercise 2a: Model descriptions
+### 2a: Model descriptions
 **Elastic Net** is a penalized linear regression model that combines the variable selection property of the Lasso with the coefficient shrinkage of Ridge regression. It is useful in our setting because the feature matrix contains many correlated predictors, including characteristic-macro interactions. The model minimizes prediction error while penalizing large coefficients, which helps reduce overfitting.
 
 The key hyperparameters are the overall penalty strength (`alpha`) and the mixing parameter (`l1_ratio`). A higher `alpha` implies stronger regularization, while `l1_ratio` controls the balance between Lasso and Ridge. When `l1_ratio = 1`, the model corresponds to the Lasso; when `l1_ratio = 0`, it corresponds to Ridge regression.
@@ -254,7 +257,7 @@ The key hyperparameters are the number of trees (`n_estimators`), the number of 
 
 Together, the two models provide a comparison between a regularized linear benchmark and a flexible nonlinear machine learning model.
 
-### Exercise 2b: Time-respecting data split
+### 2b: Time-respecting data split
 The dataset is split chronologically to avoid look-ahead bias. Training observations precede validation observations, which in turn precede test observations. The most recent 20% of months are reserved for the test set and are only used for final out-of-sample evaluation, as shown in @tbl-split.
 
 The remaining 80% of months is split into training and validation samples, yielding an approximate 60/20/20 split. The training set is used to estimate model parameters, while the validation set is used for hyperparameter tuning. The split is performed by month rather than by individual rows to preserve the panel structure.
@@ -322,8 +325,12 @@ split_summary
 
 Continuous predictors are standardized using the training sample only. The same transformation is then applied to the validation and test sets, which avoids data leakage from future observations.
 
-### Exercise 2c: Hyperparameter tuning
-Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the mean squared prediction error objective in @Gu.2020. For Elastic Net, the grid varies the overall penalty strength (`alpha`) and the balance between Lasso and Ridge regularization (`l1_ratio`). For Random Forest, we vary tree depth while keeping the number of trees, feature subsampling rule, and minimum leaf size fixed. This allows us to examine how increasing model complexity affects predictive accuracy while keeping computation feasible.
+### 2c: Hyperparameter tuning
+Hyperparameters are tuned using grid search. Each candidate specification is fitted on the training sample and evaluated on the validation sample using RMSE, consistent with the prediction-error objective in @Gu.2020.
+
+For Elastic Net, we tune the penalty strength (`alpha`) and the Lasso-Ridge mixing parameter (`l1_ratio`). For Random Forest, we use a computationally constrained grid and focus tuning on tree depth, while keeping the number of trees, feature subsampling rule, and minimum leaf size fixed.
+
+@fig-tuning-rmse shows how training and validation RMSE vary across the tuned hyperparameters. For Elastic Net, the lines are almost overlapping, indicating limited sensitivity to `l1_ratio` in this grid. For Random Forest, deeper trees slightly improve training fit, while validation RMSE remains nearly flat. 
 
 
 ```{python}
@@ -366,7 +373,7 @@ rf_param_grid = {
     "n_estimators": [50],
     "max_features": ["sqrt"],
     "min_samples_leaf": [100],
-    "max_depth": [3, 5, 8], # vary depth to illustrate complexity
+    "max_depth": [3, 5, 8], # vary depth
 }
 
 rf_results = []
@@ -394,10 +401,81 @@ best_rf_params = rf_results_df.iloc[0][
 
 ```
 
-The model selection is shown in @tbl-model-selection. The final specification for each model is selected as the one with the lowest validation RMSE. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
-
-
 ```{python}
+#| cache: true
+#| label: fig-tuning-rmse
+#| fig-cap: "Training and validation RMSE across model complexity"
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+# Elastic Net: RMSE by alpha and l1_ratio
+for l1 in sorted(en_results_df["l1_ratio"].unique()):
+    subset = en_results_df[en_results_df["l1_ratio"] == l1].sort_values("alpha")
+
+    axes[0].plot(
+        subset["alpha"],
+        subset["train_rmse"],
+        marker="o",
+        linestyle="-",
+        label=f"Train, l1_ratio={l1}"
+    )
+
+    axes[0].plot(
+        subset["alpha"],
+        subset["val_rmse"],
+        marker="o",
+        linestyle="--",
+        label=f"Validation, l1_ratio={l1}"
+    )
+
+axes[0].set_xscale("log")
+axes[0].set_title("Elastic Net")
+axes[0].set_xlabel("Penalty strength (alpha)")
+axes[0].set_ylabel("RMSE")
+axes[0].legend(fontsize=7)
+
+# Random Forest: RMSE by max_depth
+rf_plot = (
+    rf_results_df
+    .groupby("max_depth")[["train_rmse", "val_rmse"]]
+    .mean()
+    .reset_index()
+    .sort_values("max_depth")
+)
+
+axes[1].plot(
+    rf_plot["max_depth"],
+    rf_plot["train_rmse"],
+    marker="o",
+    linestyle="-",
+    label="Train RMSE"
+)
+
+axes[1].plot(
+    rf_plot["max_depth"],
+    rf_plot["val_rmse"],
+    marker="o",
+    linestyle="--",
+    label="Validation RMSE"
+)
+
+axes[1].set_title("Random Forest")
+axes[1].set_xlabel("Tree depth")
+axes[1].set_ylabel("RMSE")
+axes[1].legend(fontsize=8)
+
+plt.tight_layout()
+plt.show()
+```
+
+The final specification for each model is selected as the one with the lowest validation RMSE, as reported in @tbl-model-selection. Comparing training and validation RMSE illustrates the bias-variance trade-off: more flexible models may fit the training data better, but this does not necessarily translate into better validation performance.
+
+```{=latex}
+\begingroup
+\footnotesize
+```
+```{python}
+
 #| cache: true
 #| label: tbl-model-selection
 #| tbl-cap: "Selected hyperparameters and validation RMSE"
@@ -445,8 +523,11 @@ selected_results = pd.DataFrame({
 Markdown(selected_results.round(6).to_markdown(index=False))
 ```
 
+```{=latex}
+\endgroup
+```
 
-### Exercise 2d: Save models to disk
+### 2d: Save models to disk
 ```{python}
 #| output: false
 
@@ -465,7 +546,7 @@ final_rf = joblib.load("model_random_forest.joblib")
 The final fitted models are saved to disk using `joblib` to ensure reproducibility and facilitate peer review.
 
 ## Exercise 3
-### Exercise 3a-c: Predictions and long-short portfolios
+### 3a-c: Predictions and long-short portfolios
 Using the fitted Elastic Net and Random Forest models from Exercise 2, we generate predicted excess returns for each stock-month observation in the validation and test samples. The test set is only used for final out-of-sample evaluation and is not used for model fitting or hyperparameter selection.
 ```{python}
 # generate predictions directly from fitted models
@@ -630,7 +711,7 @@ results_3d_df = pd.DataFrame(results_3d)
 Markdown(results_3d_df.round(4).to_markdown(index=False))
 ```
 
-### Exercise 3e: Portfolio turnover
+### 3e: Portfolio turnover
 @tbl-turnover reports average monthly turnover.
 ```{python}
 def compute_turnover(df, decile_col):
@@ -673,7 +754,7 @@ turnover_df = pd.DataFrame({
 Markdown(turnover_df.round(4).to_markdown(index=False))
 ```
 
-### Exercise 3f: Model comparison
+### 3f: Model comparison
 ```{python}
 en_test = results_3d_df.query("Model == 'Elastic Net' and Sample == 'Test'").iloc[0]
 rf_test = results_3d_df.query("Model == 'Random Forest' and Sample == 'Test'").iloc[0]
@@ -700,7 +781,7 @@ Overall, Elastic Net provides the better trade-off between risk-adjusted perform
 
 
 ## Exercise 4
-### Exercise 4a: Variable importance
+### 4a: Variable importance
 
 Variable importance is measured as the drop in annualized test Sharpe ratio when one predictor is set to a reference value and the long-short portfolio is rebuilt. For standardized continuous predictors, the reference value is zero, corresponding to the training-sample mean after standardization. For industry dummies, the reference value is set to the test-sample mean.
 ```{python}
@@ -795,11 +876,11 @@ Markdown(top3_importance.round(4).to_markdown(index=False))
 This portfolio-based importance measure evaluates whether a predictor matters for the final investment strategy rather than only for return prediction accuracy. A larger Sharpe-ratio drop indicates that removing the information in that predictor reduces the economic value of the model.
 
 
-### Exercise 4b: Ranking comparison
+### 4b: Ranking comparison
 The rankings differ across the two models because Elastic Net and Random Forest use the predictors in different ways. Elastic Net is a regularized linear model, so predictor importance is tied to linear effects after shrinkage. Random Forest is more flexible and can assign importance to predictors that matter through nonlinear patterns or interactions. Differences in the rankings therefore reflect differences in model structure, not only differences in predictive strength.
 
 
-### Exercise 4c: Findings to financial theory
+### 4c: Findings to financial theory
 The Random Forest importance results suggest that portfolio performance is mainly driven by state-dependent valuation, volatility, and size effects. The largest Sharpe-ratio drop comes from `characteristic_ep_x_macro_bm`, indicating that the predictive value of earnings-to-price depends on aggregate book-to-market conditions. This is consistent with value-based return predictability varying across market valuation states.
 
 The other top predictors, `characteristic_retvol_x_macro_tbl` and `characteristic_mvel1_x_` `macro_dfy`, suggest that volatility and size effects depend on interest rate conditions and credit risk. In contrast, Elastic Net produces near-zero importance scores, consistent with its strongly regularized linear structure. Overall, the results indicate that the Random Forest model extracts economic value primarily from nonlinear and macro-dependent interactions.
