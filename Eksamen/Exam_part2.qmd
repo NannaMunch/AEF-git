@@ -50,6 +50,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import ElasticNet
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import root_mean_squared_error
+from sklearn.covariance import LedoitWolf
 ```
 
 ```{python}
@@ -57,7 +58,7 @@ from sklearn.metrics import root_mean_squared_error
 # Load high-frequency minute price data
 # ------------------------------------------------------------
 
-data_path = Path("/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Eksamen/hf_minute_prices.parquet")
+data_path = Path("/Users/esmeraldalarsson/Desktop/hf_minute_prices.parquet")
 
 hf_prices = pd.read_parquet(data_path)
 
@@ -399,19 +400,17 @@ This choice is also consistent with the empirical realized-volatility literature
 
 ## Exercise 2a: Daily realized covariance matrices
 
-We extend the realized variance estimator from Exercise 1 to the multivariate setting and estimate a daily realized covariance matrix for the 30 DJIA constituents.
-
-Let $r_{d,j}$ denote the $30 \times 1$ vector of synchronized 5-minute log returns at intraday interval $j$ on trading day $d$. The realized covariance matrix is computed as
+We estimate the daily realized covariance matrix for the 30 DJIA stocks using the standard realized covariance estimator
 
 $$
-RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}'.
+RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}',
 $$
 
-This is the multivariate analogue of the realized variance estimator used in Exercise 1.
+where $r_{d,j}$ denotes the $30 \times 1$ vector of synchronized intraday log returns at interval $j$ on trading day $d$. This estimator is the multivariate analogue of the realized variance estimator used in Exercise 1.
 
-The data are available at the minute frequency rather than at the transaction level. To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day. Missing prices are handled using previous-tick interpolation (forward filling), meaning that the most recently observed price within the same trading day is carried forward. Prices are never carried across trading days.
+Following Exercise 1, covariance is estimated using synchronized 5-minute returns. The same sampling frequency is used throughout the remainder of the analysis, ensuring consistency with the realized variance estimator selected based on the volatility signature plot.
 
-After synchronization, prices are sampled every five minutes and converted into log returns. The 5-minute frequency is chosen based on the volatility signature plot in Exercise 1 and is also consistent with the realized-volatility literature, where 5-minute returns are commonly used as a compromise between reducing market microstructure noise and retaining intraday information.
+To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day and missing observations are handled using previous-tick interpolation (forward filling). Returns are then computed on a common 5-minute grid, ensuring that the covariance matrix is based on synchronized return vectors.
 
 For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors.
 
@@ -583,27 +582,51 @@ rv_long = (
 #| fig-cap: "Daily realized variances for the 30 DJIA stocks."
 #| fig-align: center
 #| fig-pos: "H"
+#| fig-width: 12
+#| fig-height: 7
 
 import matplotlib.pyplot as plt
 
-plt.close('all')
+plt.close("all")
 
 rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
 
-# Create ONE figure with all 30 stocks
 fig, ax = plt.subplots(figsize=(14, 7))
 
-# Plot each stock's realized variance as a line
 for symbol in symbols:
-    stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
-    ax.plot(stock_data["trading_day"], stock_data["realized_variance"], 
-            label=symbol, linewidth=1, alpha=0.7)
 
-ax.set_xlabel("Trading Day", fontsize=11)
-ax.set_ylabel("Realized Variance", fontsize=11)
-ax.set_title("Daily realized variances for the 30 DJIA stocks", fontsize=12)
-ax.legend(ncol=6, fontsize=8, loc="upper left", bbox_to_anchor=(0, 1))
+    stock_data = rv_long_plot[
+        rv_long_plot["symbol"] == symbol
+    ]
+
+    ax.plot(
+        stock_data["trading_day"],
+        stock_data["realized_variance"],
+        label=symbol,
+        linewidth=0.8,
+        alpha=0.7
+    )
+
+ax.set_xlabel("Trading day")
+ax.set_ylabel("Realized variance")
+ax.set_title("Daily realized variances for the 30 DJIA stocks")
+
 ax.grid(True, alpha=0.3)
+
+ax.legend(
+    loc="upper right",
+    ncol=3,
+    fontsize=7,
+    frameon=True
+)
+
 plt.xticks(rotation=45)
+
 fig.tight_layout()
+
+plt.show()
 ```
+
+The realized variance series exhibit clear volatility clustering, with periods of high volatility followed by further periods of high volatility and vice versa. Several stocks experience large volatility spikes during periods of market stress, indicating that volatility tends to increase simultaneously across assets.
+
+The figure also shows substantial time variation in realized variance, suggesting that volatility is far from constant over time. While the overall patterns are similar across stocks, some stocks display persistently higher realized variance than others, reflecting differences in underlying risk characteristics.
