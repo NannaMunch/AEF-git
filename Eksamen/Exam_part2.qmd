@@ -588,3 +588,5 @@ The realized variances in Figure @fig-all-stocks-rv exhibit pronounced volatilit
 ### Microstructure noise: frequency selection
 
 At 1-minute frequency, realized variance inflates to 0.000298 versus 0.000245 at 5-minute—a 22% microstructure effect. Bid-ask bounce induces negative autocovariance, systematically biasing correlations downward by 15–20% at 1-minute frequency. This bias would underestimate true co-movement and produce poorly diversified portfolios. At 5-minute frequency, this noise is eliminated, enabling reliable estimation of minimum-variance portfolios for Exercises 3–5.
+
+Hej ESME
