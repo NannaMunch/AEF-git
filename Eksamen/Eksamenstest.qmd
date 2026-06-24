@@ -395,3 +395,148 @@ $$
 
 This choice is also consistent with the empirical realized-volatility literature, where 5-minute returns are commonly used as a practical compromise between using high-frequency information and limiting market microstructure noise. Andersen and Bollerslev discuss the use of high-frequency intraday returns to obtain improved volatility measurements and refer to empirical analysis based on five-minute returns. At the same time, 5-minute sampling leaves approximately $390/5-1=77$ intraday returns per trading day. Since the subsequent realized covariance matrix is 30-dimensional, this helps avoid the rank problem emphasized in the lecture slides: when the return matrix has $T<N$, the sample covariance matrix is singular and cannot be inverted. Thus, 5-minute sampling is preferred to lower-frequency choices such as 15, 30 or 60 minutes, which would leave fewer intraday returns for estimating the $30 \times 30$ covariance matrix.
 
+
+## Exercise 2a: Daily realized covariance matrices
+
+We extend the realized variance estimator from Exercise 1 to the multivariate setting and estimate a daily realized covariance matrix for the 30 DJIA constituents.
+
+Let $r_{d,j}$ denote the $30 \times 1$ vector of synchronized 5-minute log returns at intraday interval $j$ on trading day $d$. The realized covariance matrix is computed as
+
+$$
+RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}'.
+$$
+
+This is the multivariate analogue of the realized variance estimator used in Exercise 1.
+
+The data are available at the minute frequency rather than at the transaction level. To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day. Missing prices are handled using previous-tick interpolation (forward filling), meaning that the most recently observed price within the same trading day is carried forward. Prices are never carried across trading days.
+
+After synchronization, prices are sampled every five minutes and converted into log returns. The 5-minute frequency is chosen based on the volatility signature plot in Exercise 1 and is also consistent with the realized-volatility literature, where 5-minute returns are commonly used as a compromise between reducing market microstructure noise and retaining intraday information.
+
+For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors.
+
+```{python}
+#| output: false
+
+# ------------------------------------------------------------
+# Exercise 2a: Daily realized covariance matrices
+# ------------------------------------------------------------
+
+CHOSEN_DELTA = 5
+
+symbols = np.sort(hf_prices["symbol"].unique())
+trading_days_all = np.sort(hf_prices["trading_day"].unique())
+
+rc_matrices = {}
+
+for day in trading_days_all:
+
+    day_data = (
+        hf_prices[hf_prices["trading_day"] == day]
+        .copy()
+        .sort_values(["symbol", "ts"])
+    )
+
+    market_open = market_timestamp(day, MARKET_OPEN)
+    market_close = market_timestamp(day, MARKET_CLOSE)
+
+    one_min_grid = pd.date_range(
+        start=market_open,
+        end=market_close,
+        freq="1min"
+    )
+
+    prices_wide = (
+        day_data
+        .pivot_table(
+            index="ts",
+            columns="symbol",
+            values="price",
+            aggfunc="last"
+        )
+        .reindex(one_min_grid)
+        .ffill()
+    )
+
+    prices_wide = prices_wide[symbols]
+
+    prices_sampled = prices_wide.iloc[::CHOSEN_DELTA]
+
+    returns = (
+        np.log(prices_sampled)
+        .diff()
+        .dropna()
+    )
+
+    rc_day = returns.T @ returns
+
+    rc_matrices[day] = rc_day
+```
+
+## Exercise 2b: Diagonal elements of the realized covariance matrix
+The diagonal elements of the realized covariance matrix $RC_d$ are the daily realized variances of the individual stocks. For stock $i$, the diagonal element is
+
+$$
+RC_{d,ii} = \sum_{j=1}^{M_d} r_{d,j,i}^2.
+$$
+
+Thus, by extracting the diagonal of each daily realized covariance matrix, we obtain a time series of daily realized variance for each of the 30 stocks.
+
+```{python}
+# ------------------------------------------------------------
+# Exercise 2b: Extract diagonal elements from RC_d
+# ------------------------------------------------------------
+
+rv_by_stock = pd.DataFrame(
+    [
+        {
+            "trading_day": day,
+            **dict(zip(symbols, np.diag(rc_matrix.values)))
+        }
+        for day, rc_matrix in rc_matrices.items()
+    ]
+)
+
+rv_by_stock["trading_day"] = pd.to_datetime(rv_by_stock["trading_day"])
+
+rv_long = (
+    rv_by_stock
+    .melt(
+        id_vars="trading_day",
+        value_vars=symbols,
+        var_name="symbol",
+        value_name="realized_variance"
+    )
+)
+
+```
+
+```{python}
+#| label: fig-rv-all-stocks
+#| fig-cap: "Daily realized variance for all 30 DJIA stocks."
+#| fig-width: 10
+#| fig-height: 6
+
+plt.figure(figsize=(10, 6))
+
+for stock in symbols:
+
+    stock_data = (
+        rv_long[rv_long["symbol"] == stock]
+        .sort_values("trading_day")
+    )
+
+    plt.plot(
+        stock_data["trading_day"],
+        stock_data["realized_variance"],
+        linewidth=0.7,
+        alpha=0.6
+    )
+
+plt.xlabel("Trading day")
+plt.ylabel("Realized variance")
+plt.title("Daily realized variance of the 30 DJIA stocks")
+
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
