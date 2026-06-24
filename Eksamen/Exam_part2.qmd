@@ -1,0 +1,27 @@
+---
+title: Exam 2026, Part 2
+author: Exam number 45, 46 & 47
+date: 2026-26-06
+date-format: MMMM DD, YYYY
+execute: 
+  echo: false
+  warning: false
+format:
+  pdf: 
+    titlepage: true
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - top=20mm
+      - left=20mm
+      - bottom=20mm
+      - right=20mm
+    bibliography: references.bib
+    cite-method: natbib
+    biblio-style: apalike  
+    lang: en
+    fontsize: 12pt
+    highlight-style: github-light
+---
+
+
