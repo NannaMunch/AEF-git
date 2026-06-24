@@ -387,12 +387,6 @@ plt.tight_layout()
 plt.show()
 ```
 
-```{python}
-#| output: false
-
-# Chosen sampling interval for the remaining analysis
-DELTA = 5
-```
 
 
 ## Exercise 2a: Daily realized covariance matrices
@@ -414,7 +408,6 @@ After synchronization, prices are sampled every five minutes and converted into 
 For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors.
 
 ```{python}
-
 # ------------------------------------------------------------
 # Exercise 2a: Daily realized covariance matrices
 # ------------------------------------------------------------
