@@ -572,61 +572,43 @@ rv_long = (
 
 ```{python}
 #| label: fig-realized-variances-30-stocks
-#| fig-cap: "Daily realized variances for the 30 DJIA stocks. Each panel shows the diagonal element of the daily realized covariance matrix for one stock."
+#| fig-cap: "Daily realized variances for the 30 DJIA stocks."
 #| fig-align: center
-#| fig-pos: "H"
+#| fig-width: 10
+#| fig-height: 6
 
 # ------------------------------------------------------------
-# Exercise 2b: Plot daily realized variances for all 30 stocks
+# Exercise 2b: Plot all 30 realized variance series in one figure
 # ------------------------------------------------------------
 
-import math
-import matplotlib.pyplot as plt
-
-# Sort data for plotting
 rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
 
-# Create one panel per stock
-n_stocks = len(symbols)
-n_cols = 5
-n_rows = math.ceil(n_stocks / n_cols)
+plt.figure(figsize=(10, 6))
 
-fig, axes = plt.subplots(
-    n_rows,
-    n_cols,
-    figsize=(12, 10),
-    sharex=True
-)
-
-axes = axes.flatten()
-
-for i, symbol in enumerate(symbols):
-    
-    ax = axes[i]
+for symbol in symbols:
     
     stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
     
-    ax.plot(
+    plt.plot(
         stock_data["trading_day"],
         stock_data["realized_variance"],
-        linewidth=0.8
+        linewidth=0.7,
+        alpha=0.6,
+        label=symbol
     )
-    
-    ax.set_title(symbol, fontsize=8)
-    ax.tick_params(axis="x", labelrotation=45, labelsize=6)
-    ax.tick_params(axis="y", labelsize=6)
-    ax.grid(True, alpha=0.3)
 
-# Remove unused subplots if any
-for j in range(n_stocks, len(axes)):
-    fig.delaxes(axes[j])
+plt.xlabel("Trading day")
+plt.ylabel("Realized variance")
+plt.title("Daily realized variance for all 30 DJIA stocks")
 
-fig.suptitle(
-    "Daily realized variances for the 30 DJIA stocks",
-    fontsize=12,
-    y=0.995
+plt.grid(True, alpha=0.3)
+
+plt.legend(
+    fontsize=6,
+    ncol=3,
+    loc="upper right"
 )
 
-fig.tight_layout(rect=[0, 0, 1, 0.98])
+plt.tight_layout()
 plt.show()
 ```
