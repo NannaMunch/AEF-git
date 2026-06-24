@@ -1,0 +1,854 @@
+---
+title: Exam 2026, Part 2
+author: Exam number 45, 46 & 47
+date: 2026-06-26
+date-format: MMMM DD, YYYY
+execute: 
+  echo: false
+  warning: false
+  cache: true
+format:
+  pdf: 
+    titlepage: true
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - top=20mm
+      - left=20mm
+      - bottom=20mm
+      - right=20mm
+    bibliography: references.bib
+    cite-method: natbib
+    biblio-style: apalike  
+    lang: en
+    fontsize: 12pt
+    highlight-style: github-light
+---
+
+```{python}
+# standard library
+from pathlib import Path
+import itertools
+
+# data handling and model storage
+import joblib
+import numpy as np
+import pandas as pd
+import tidyfinance as tf
+
+# plotting
+from plotnine import *
+from mizani.formatters import percent_format
+from IPython.display import Markdown
+import matplotlib.pyplot as plt
+
+# statistical models
+import statsmodels.api as sm
+
+# machine learning
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import root_mean_squared_error
+from sklearn.covariance import LedoitWolf
+```
+
+```{python}
+# ------------------------------------------------------------
+# Load high-frequency minute price data
+# ------------------------------------------------------------
+
+data_path = Path("/Users/AstridMoeller/AEF/data/hf_minute_prices.parquet")
+
+hf_prices = pd.read_parquet(data_path)
+
+# Convert timestamp column to datetime format
+hf_prices["ts"] = pd.to_datetime(hf_prices["ts"])
+
+# Extract trading day from timestamp
+hf_prices["trading_day"] = hf_prices["ts"].dt.date
+
+
+# ------------------------------------------------------------
+# Fixed trading-hours setup used
+# ------------------------------------------------------------
+
+MARKET_OPEN = "09:30:00"
+MARKET_CLOSE = "15:59:00"
+
+# Preserve the timezone of the timestamp column.
+# In the rendered output, timestamps appear as +00:00,
+# so the grid must use the same timezone.
+TS_TZ = hf_prices["ts"].dt.tz
+
+def market_timestamp(trading_day, clock_time):
+    """
+    Create a timestamp for a given trading day and clock time,
+    using the same timezone as the raw timestamp column.
+    """
+    return pd.Timestamp(f"{trading_day} {clock_time}", tz=TS_TZ)
+```
+
+## Exercise 1: Choice of realized variance estimator
+
+We first load the high-frequency minute price data and filter the dataset to AAPL. The timestamp column is converted to datetime format, and we define each trading day from the timestamp.
+
+The data contain minute-level closing prices during regular trading hours. We use a fixed one-minute calendar-time grid from 09:30 to 15:59 for each trading day. This corresponds to 390 one-minute observations per normal trading day. Since a stock may not trade in every minute, we handle missing prices using previous-tick interpolation within each trading day only. This means that if AAPL has no observed price in a given minute, we carry forward the most recently observed price from the same trading day. We do not carry prices across trading days, and we do not backfill prices before the first observed price of a day.
+
+For each sampling interval $\Delta \in \{1,2,5,10,15,30,60\}$, we sample prices on a fixed grid relative to the market open. For example, with 10-minute sampling, prices are taken at 09:30, 09:40, 09:50, and so on. This differs from a bucket-based approach, where the last observed price within each $\Delta$-minute interval is used. We prefer the fixed-grid approach because it makes the sampling rule explicit and because it will later allow us to align intraday returns across all 30 stocks when constructing realized covariance matrices.
+
+Daily realized variance is computed as:
+$$
+RV_d^{(\Delta)} = \sum_j \left(r_{d,j}^{(\Delta)}\right)^2,
+$$
+
+where \(r_{d,j}^{(\Delta)}\) is the intraday log return over sampling interval.
+
+```{python}
+# ------------------------------------------------------------
+# Keep AAPL only and sort by timestamp
+# ------------------------------------------------------------
+
+aapl_raw = (
+    hf_prices
+    .query("symbol == 'AAPL'")
+    .sort_values(["trading_day", "ts"])
+    .copy()
+)
+
+# Compute log price
+# High-frequency realized variance is based on log returns
+aapl_raw["log_price"] = np.log(aapl_raw["price"])
+```
+
+```{python}
+# ------------------------------------------------------------
+# Check missing minute observations before forward-filling
+# ------------------------------------------------------------
+
+def missing_minutes_one_day(group):
+    """
+    Count missing minute observations within one trading day.
+
+    Missing observations are measured relative to a fixed regular
+    trading-hours grid from 09:30 to 15:59.
+
+    The grid uses the same timezone as the timestamp column.
+    """
+    
+    group = group.sort_values("ts").copy()
+    trading_day = group["trading_day"].iloc[0]
+
+    market_open = market_timestamp(trading_day, MARKET_OPEN)
+    market_close = market_timestamp(trading_day, MARKET_CLOSE)
+
+    full_grid = pd.date_range(
+        start=market_open,
+        end=market_close,
+        freq="1min"
+    )
+
+    observed_minutes = group["ts"].drop_duplicates()
+
+    expected_minutes = len(full_grid)
+    observed_minutes_count = observed_minutes.nunique()
+    missing_minutes = expected_minutes - observed_minutes_count
+    missing_share = missing_minutes / expected_minutes
+
+    return pd.Series({
+        "market_open": market_open,
+        "market_close": market_close,
+        "first_observed_timestamp": group["ts"].min(),
+        "last_observed_timestamp": group["ts"].max(),
+        "expected_minutes": expected_minutes,
+        "observed_minutes": observed_minutes_count,
+        "missing_minutes": missing_minutes,
+        "missing_share": missing_share
+    })
+
+
+aapl_missing_by_day = (
+    aapl_raw
+    .groupby("trading_day")
+    .apply(missing_minutes_one_day)
+    .reset_index()
+)
+
+overall_missing_share = (
+    aapl_missing_by_day["missing_minutes"].sum()
+    / aapl_missing_by_day["expected_minutes"].sum()
+)
+```
+
+
+```{python}
+# ------------------------------------------------------------
+# Create regular one-minute grid and forward-fill missing prices
+# ------------------------------------------------------------
+
+# Create the fixed intraday minute grid.
+intraday_times = pd.date_range(
+    start=f"2000-01-01 {MARKET_OPEN}",
+    end=f"2000-01-01 {MARKET_CLOSE}",
+    freq="1min"
+).time
+
+# Use all AAPL trading days
+trading_days = np.sort(aapl_raw["trading_day"].unique())
+
+# Create a full grid of every trading day x every intraday minute
+grid = pd.MultiIndex.from_product(
+    [trading_days, intraday_times],
+    names=["trading_day", "time"]
+).to_frame(index=False)
+
+# Create timezone-aware timestamps for the full grid
+grid["ts"] = pd.to_datetime(
+    grid["trading_day"].astype(str) + " " + grid["time"].astype(str)
+)
+
+if TS_TZ is not None:
+    grid["ts"] = grid["ts"].dt.tz_localize(TS_TZ)
+
+# Prepare observed AAPL prices for merging onto the grid
+aapl_for_merge = (
+    aapl_raw
+    .copy()
+    .assign(time=lambda x: x["ts"].dt.time)
+    [["trading_day", "time", "price"]]
+)
+
+# Merge observed prices onto the fixed grid
+aapl_minute = (
+    grid
+    .merge(
+        aapl_for_merge,
+        on=["trading_day", "time"],
+        how="left"
+    )
+    .sort_values(["trading_day", "ts"])
+    .copy()
+)
+
+aapl_minute["symbol"] = "AAPL"
+
+# Previous-tick interpolation within each trading day only
+aapl_minute["price"] = (
+    aapl_minute
+    .groupby("trading_day")["price"]
+    .ffill()
+)
+
+# Drop missing prices before the first observed price of a day.
+# We do not backfill.
+aapl_minute = (
+    aapl_minute
+    .dropna(subset=["price"])
+    .sort_values(["trading_day", "ts"])
+    .reset_index(drop=True)
+)
+
+aapl_minute["log_price"] = np.log(aapl_minute["price"])
+
+minute_check = (
+    aapl_minute
+    .groupby("trading_day")
+    .size()
+    .rename("n_minutes_after_fill")
+    .reset_index()
+)
+```
+
+```{python}
+# ------------------------------------------------------------
+# Function to compute daily realized variance
+# ------------------------------------------------------------
+
+def compute_daily_rv(data, sampling_minutes):
+    """
+    Compute daily realized variance for a given sampling interval.
+
+    Prices are sampled on a fixed grid relative to the market open.
+    For example, 10-minute sampling keeps 09:30, 09:40, 09:50, ...
+    """
+    
+    sampled = data.sort_values(["trading_day", "ts"]).copy()
+
+    sampled["market_open"] = sampled["trading_day"].apply(
+        lambda d: market_timestamp(d, MARKET_OPEN)
+    )
+
+    sampled["minutes_since_open"] = (
+        (sampled["ts"] - sampled["market_open"])
+        .dt.total_seconds()
+        / 60
+    ).round().astype(int)
+
+    # Keep only observations on the Delta-minute grid
+    sampled = sampled[
+        sampled["minutes_since_open"] % sampling_minutes == 0
+    ].copy()
+
+    # Compute intraday log returns within each trading day
+    sampled["intraday_return"] = (
+        sampled
+        .groupby("trading_day")["log_price"]
+        .diff()
+    )
+
+    rv_daily = (
+        sampled
+        .groupby("trading_day")
+        .agg(
+            realized_variance=(
+                "intraday_return",
+                lambda x: np.nansum(x ** 2)
+            ),
+            n_returns=(
+                "intraday_return",
+                lambda x: x.notna().sum()
+            )
+        )
+        .reset_index()
+    )
+
+    rv_daily["sampling_minutes"] = sampling_minutes
+
+    return rv_daily
+```
+
+```{python}
+# ------------------------------------------------------------
+# Compute realized variance for all sampling intervals
+# ------------------------------------------------------------
+
+sampling_intervals = [1, 2, 5, 10, 15, 30, 60]
+
+rv_all = pd.concat(
+    [
+        compute_daily_rv(aapl_minute, interval)
+        for interval in sampling_intervals
+    ],
+    ignore_index=True
+)
+```
+
+```{python}
+# ------------------------------------------------------------
+# Average realized variance and estimation uncertainty
+# ------------------------------------------------------------
+rv_summary = (
+    rv_all
+    .groupby("sampling_minutes")
+    .agg(
+        mean_rv=("realized_variance", "mean"),
+        sd_rv=("realized_variance", "std"),
+        n_days=("realized_variance", "count")
+    )
+    .reset_index()
+)
+
+rv_summary["se_rv"] = rv_summary["sd_rv"] / np.sqrt(rv_summary["n_days"])
+
+rv_summary["ci_lower"] = rv_summary["mean_rv"] - 1.96 * rv_summary["se_rv"]
+rv_summary["ci_upper"] = rv_summary["mean_rv"] + 1.96 * rv_summary["se_rv"]
+```
+
+As shown in @fig-aapl-volatility-signature, average realized variance is highest at the shortest sampling intervals and decreases as the sampling interval increases. This pattern is consistent with market microstructure noise at very high frequencies, such as bid-ask bounce, price discreteness, and stale prices. At very fine sampling intervals, these frictions can inflate realized variance because observed transaction prices deviate from the latent efficient price. Sampling less frequently reduces this noise, but very long sampling intervals also discard useful intraday information.
+
+```{python}
+#| label: fig-aapl-volatility-signature
+#| fig-cap: "Volatility signature plot for AAPL with 95% confidence intervals."
+#| fig-align: center
+
+# ------------------------------------------------------------
+# Volatility signature plot with error bars
+# ------------------------------------------------------------
+
+plt.figure(figsize=(8, 5))
+
+plt.errorbar(
+    rv_summary["sampling_minutes"],
+    rv_summary["mean_rv"],
+    yerr=1.96 * rv_summary["se_rv"],
+    marker="o",
+    capsize=4,
+    linewidth=1.5,
+    label="Average daily realized variance"
+)
+
+plt.xlabel("Sampling interval $\\Delta$ in minutes")
+plt.ylabel("Average daily realized variance")
+plt.title("Volatility signature plot for AAPL")
+plt.xticks(sampling_intervals)
+plt.grid(True, alpha=0.3)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| output: false
+
+# Chosen sampling interval for the remaining analysis
+DELTA = 5
+```
+
+
+## Exercise 2a: Daily realized covariance matrices
+
+We extend the realized variance estimator from Exercise 1 to the multivariate setting and estimate a daily realized covariance matrix for the 30 DJIA constituents.
+
+Let $r_{d,j}$ denote the $30 \times 1$ vector of synchronized 5-minute log returns at intraday interval $j$ on trading day $d$. The realized covariance matrix is computed as
+
+$$
+RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}'.
+$$
+
+This is the multivariate analogue of the realized variance estimator used in Exercise 1.
+
+The data are available at the minute frequency rather than at the transaction level. To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day. Missing prices are handled using previous-tick interpolation (forward filling), meaning that the most recently observed price within the same trading day is carried forward. Prices are never carried across trading days.
+
+After synchronization, prices are sampled every five minutes and converted into log returns. The 5-minute frequency is chosen based on the volatility signature plot in Exercise 1 and is also consistent with the realized-volatility literature, where 5-minute returns are commonly used as a compromise between reducing market microstructure noise and retaining intraday information.
+
+For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors.
+
+```{python}
+
+# ------------------------------------------------------------
+# Exercise 2a: Daily realized covariance matrices
+# ------------------------------------------------------------
+
+# Use the sampling interval chosen in Exercise 1
+DELTA = 5
+
+symbols = np.sort(hf_prices["symbol"].unique())
+trading_days_all = np.sort(hf_prices["trading_day"].unique())
+
+# Create one-minute intraday grid
+intraday_times = pd.date_range(
+    start=f"2000-01-01 {MARKET_OPEN}",
+    end=f"2000-01-01 {MARKET_CLOSE}",
+    freq="1min"
+).time
+
+# Full grid: trading day x intraday minute
+grid = pd.MultiIndex.from_product(
+    [trading_days_all, intraday_times],
+    names=["trading_day", "time"]
+).to_frame(index=False)
+
+grid["ts"] = pd.to_datetime(
+    grid["trading_day"].astype(str) + " " + grid["time"].astype(str)
+)
+
+if TS_TZ is not None:
+    grid["ts"] = grid["ts"].dt.tz_localize(TS_TZ)
+
+grid["minutes_since_open"] = (
+    grid
+    .groupby("trading_day")
+    .cumcount()
+)
+
+full_index = pd.MultiIndex.from_frame(
+    grid[["trading_day", "ts"]]
+)
+
+# Put prices in wide format once:
+# rows = trading day and timestamp
+# columns = stocks
+prices_wide_raw = (
+    hf_prices
+    .pivot_table(
+        index=["trading_day", "ts"],
+        columns="symbol",
+        values="price",
+        aggfunc="last"
+    )
+    .sort_index()
+)
+
+# Reindex to full one-minute grid
+prices_wide = (
+    prices_wide_raw
+    .reindex(full_index)
+    .sort_index()
+)
+
+# Previous-tick interpolation within each trading day only
+prices_wide = (
+    prices_wide
+    .groupby(level="trading_day")
+    .ffill()
+)
+
+# Fixed stock order
+prices_wide = prices_wide[symbols]
+
+# Select 5-minute timestamps
+sample_grid = grid.loc[
+    grid["minutes_since_open"] % DELTA == 0,
+    ["trading_day", "ts"]
+]
+
+sample_index = pd.MultiIndex.from_frame(sample_grid)
+
+# Sample log prices
+sampled_log_prices = np.log(
+    prices_wide.loc[sample_index]
+)
+
+# Intraday log returns within each trading day
+returns_wide = (
+    sampled_log_prices
+    .groupby(level="trading_day")
+    .diff()
+)
+
+# Compute daily realized covariance matrices
+rc_matrices = {}
+rc_diagnostics = []
+
+for trading_day, returns_day in returns_wide.groupby(level="trading_day"):
+    
+    returns_day = returns_day.droplevel("trading_day")
+    returns_day = returns_day.dropna(how="any")
+    
+    if len(returns_day) < 2:
+        continue
+    
+    R = returns_day[symbols].to_numpy()
+    
+    # Realized covariance matrix:
+    # RC_d = sum_j r_{d,j} r_{d,j}'
+    rc_day = R.T @ R
+    
+    rc_matrices[trading_day] = pd.DataFrame(
+        rc_day,
+        index=symbols,
+        columns=symbols
+    )
+    
+    rc_diagnostics.append({
+        "trading_day": trading_day,
+        "n_returns": len(returns_day),
+        "matrix_rank": np.linalg.matrix_rank(rc_day),
+        "min_eigenvalue": np.linalg.eigvalsh(rc_day).min()
+    })
+
+rc_diagnostics = pd.DataFrame(rc_diagnostics)
+```
+
+## Exercise 2b: Diagonal elements of the realized covariance matrix
+The diagonal elements of the realized covariance matrix $RC_d$ are the daily realized variances of the individual stocks. For stock $i$, the diagonal element is
+
+$$
+RC_{d,ii} = \sum_{j=1}^{M_d} r_{d,j,i}^2.
+$$
+
+Thus, by extracting the diagonal of each daily realized covariance matrix, we obtain a time series of daily realized variance for each of the 30 stocks.
+
+```{python}
+# ------------------------------------------------------------
+# Exercise 2b: Extract diagonal elements from RC_d
+# ------------------------------------------------------------
+
+rv_by_stock = pd.DataFrame(
+    [
+        {
+            "trading_day": day,
+            **dict(zip(symbols, np.diag(rc_matrix.values)))
+        }
+        for day, rc_matrix in rc_matrices.items()
+    ]
+)
+
+rv_by_stock["trading_day"] = pd.to_datetime(rv_by_stock["trading_day"])
+
+rv_long = (
+    rv_by_stock
+    .melt(
+        id_vars="trading_day",
+        value_vars=symbols,
+        var_name="symbol",
+        value_name="realized_variance"
+    )
+)
+```
+
+```{python}
+#| label: fig-realized-variances-30-stocks
+#| fig-cap: "Daily realized variances for the 30 DJIA stocks."
+#| fig-align: center
+#| fig-pos: "H"
+
+import matplotlib.pyplot as plt
+
+plt.close('all')
+
+# Sort data for plotting
+rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
+
+# Create ONE figure with all 30 stocks
+fig, ax = plt.subplots(figsize=(14, 7))
+
+# Plot each stock's realized variance as a line
+for symbol in symbols:
+    stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
+    ax.plot(stock_data["trading_day"], stock_data["realized_variance"], 
+            label=symbol, linewidth=1, alpha=0.7)
+
+ax.set_xlabel("Trading Day", fontsize=11)
+ax.set_ylabel("Realized Variance", fontsize=11)
+ax.set_title("Daily realized variances for the 30 DJIA stocks", fontsize=12)
+ax.legend(ncol=6, fontsize=8, loc="upper left", bbox_to_anchor=(0, 1))
+ax.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+fig.tight_layout()
+```
+
+
+## Exercise 3: Covariance estimators
+
+For each day $t$ in the second half of the sample, we construct two estimators of today’s covariance matrix using only information available up to day $t-1$.
+
+```{python}
+# ------------------------------------------------------------
+# Daily close-to-close returns for all 30 stocks
+# ------------------------------------------------------------
+
+# Use the last intraday price for each stock on each trading day
+daily_close = (
+    hf_prices
+    .sort_values(["symbol", "trading_day", "ts"])
+    .groupby(["trading_day", "symbol"], as_index=False)
+    .last()
+)
+
+# Wide price matrix: rows = trading days, columns = stocks
+daily_prices_wide = (
+    daily_close
+    .pivot(index="trading_day", columns="symbol", values="price")
+    .sort_index()
+)
+
+# Keep the same stock order as in Exercise 2
+daily_prices_wide = daily_prices_wide[symbols]
+
+# Daily close-to-close log returns
+daily_returns = (
+    np.log(daily_prices_wide)
+    .diff()
+    .dropna(how="any")
+)
+
+# ------------------------------------------------------------
+# Evaluation period: second half of the sample
+# ------------------------------------------------------------
+
+# Trading days for which realized covariance matrices are available
+rc_days = sorted(rc_matrices.keys())
+
+# Use the second half of the realized-covariance sample
+eval_start = len(rc_days) // 2
+evaluation_days = rc_days[eval_start:]
+
+```
+
+
+### Exercise 3a-b: High-frequency random walk and Ledoit-Wolf shrinkage estimator
+The high-frequency estimator is defined as:
+
+$$
+\hat{\Sigma}^{HF}_t = RC_{t-1}.
+$$
+
+Thus, yesterday’s realized covariance matrix is used as today’s covariance forecast. This implies a random-walk assumption for the covariance matrix: the best forecast of today’s covariance matrix is yesterday’s realized covariance matrix. This assumption is motivated by the persistence and clustering typically observed in volatility and covariance dynamics.
+
+```{python}
+# ------------------------------------------------------------
+# 3a. High-frequency random walk covariance estimator
+# ------------------------------------------------------------
+
+# Today's high-frequency covariance estimator is yesterday's
+# realized covariance matrix:
+# Sigma_HF_t = RC_{t-1}
+
+hf_covariances = {}
+
+for i in range(1, len(rc_days)):
+    
+    trading_day = rc_days[i]
+    previous_day = rc_days[i - 1]
+    
+    # Only construct estimators for the second half of the sample
+    if trading_day not in evaluation_days:
+        continue
+    
+    hf_covariances[trading_day] = rc_matrices[previous_day]
+```
+
+```{python}
+# ------------------------------------------------------------
+# 3b. Ledoit-Wolf shrinkage estimator
+# ------------------------------------------------------------
+
+# We use a rolling window of one trading year
+W = 252
+
+lw_covariances = {}
+lw_variance_data = []
+
+daily_return_days = list(daily_returns.index)
+
+for trading_day in evaluation_days:
+    
+    # The Ledoit-Wolf estimator requires daily returns up to t - 1.
+    # If the trading day is not in the daily-return index, skip it.
+    if trading_day not in daily_return_days:
+        continue
+    
+    pos = daily_return_days.index(trading_day)
+    
+    # Need at least W previous observations
+    if pos < W:
+        continue
+    
+    # Rolling window ending on day t - 1
+    window_returns = daily_returns.iloc[pos - W:pos]
+    
+    # Estimate Ledoit-Wolf covariance matrix
+    lw_model = LedoitWolf()
+    lw_model.fit(window_returns.values)
+    
+    sigma_lw = pd.DataFrame(
+        lw_model.covariance_,
+        index=symbols,
+        columns=symbols
+    )
+    
+    lw_covariances[trading_day] = sigma_lw
+    
+    # Store diagonal elements for Exercise 3c
+    for symbol in symbols:
+        lw_variance_data.append({
+            "trading_day": trading_day,
+            "symbol": symbol,
+            "lw_variance": sigma_lw.loc[symbol, symbol]
+        })
+
+lw_variances = pd.DataFrame(lw_variance_data)
+lw_variances["trading_day"] = pd.to_datetime(lw_variances["trading_day"])
+```
+
+
+### Exercise 3c: Comparing realized and Ledoit-Wolf variances
+```{python}
+# ------------------------------------------------------------
+# 3c. Merge LW-implied variances and realized variances
+# ------------------------------------------------------------
+
+# realized variance from Exercise 2b
+rv_realized = (
+    rv_long
+    .copy()
+    .rename(columns={"realized_variance": "rc_realized_variance"})
+)
+
+rv_realized["trading_day"] = pd.to_datetime(rv_realized["trading_day"])
+
+variance_comparison = (
+    lw_variances
+    .merge(
+        rv_realized,
+        on=["trading_day", "symbol"],
+        how="inner"
+    )
+)
+```
+
+```{python}
+#| label: fig-lw-vs-realized-variance
+#| fig-cap: "Ledoit-Wolf implied variances and realized variances for the 30 DJIA stocks. The Ledoit-Wolf estimates are based on a 252-day rolling window of daily close-to-close returns, while realized variances are the diagonal elements of the daily realized covariance matrices."
+#| fig-align: center
+#| fig-pos: "H"
+
+# ------------------------------------------------------------
+# Exercise 3c: Plot LW-implied variance against realized variance
+# ------------------------------------------------------------
+
+import math
+
+variance_comparison_plot = (
+    variance_comparison
+    .sort_values(["symbol", "trading_day"])
+    .copy()
+)
+
+n_stocks = len(symbols)
+n_cols = 5
+n_rows = math.ceil(n_stocks / n_cols)
+
+fig, axes = plt.subplots(
+    n_rows,
+    n_cols,
+    figsize=(12, 10),
+    sharex=True,
+    sharey=False
+)
+
+axes = axes.flatten()
+
+for i, symbol in enumerate(symbols):
+    
+    ax = axes[i]
+    
+    stock_data = variance_comparison_plot[
+        variance_comparison_plot["symbol"] == symbol
+    ]
+    
+    ax.plot(
+        stock_data["trading_day"],
+        stock_data["rc_realized_variance"],
+        linewidth=0.7,
+        alpha=0.75,
+        label="Realized"
+    )
+    
+    ax.plot(
+        stock_data["trading_day"],
+        stock_data["lw_variance"],
+        linewidth=0.9,
+        alpha=0.9,
+        label="Ledoit-Wolf"
+    )
+    
+    ax.set_title(symbol, fontsize=8)
+    ax.tick_params(axis="x", labelrotation=45, labelsize=6)
+    ax.tick_params(axis="y", labelsize=6)
+    ax.grid(True, alpha=0.3)
+
+for j in range(n_stocks, len(axes)):
+    fig.delaxes(axes[j])
+
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(
+    handles,
+    labels,
+    loc="upper center",
+    ncol=2,
+    fontsize=8,
+    frameon=False
+)
+
+fig.suptitle(
+    "Ledoit-Wolf implied variances vs. realized variances",
+    fontsize=12,
+    y=0.995
+)
+
+fig.tight_layout(rect=[0, 0, 1, 0.96])
+plt.show()
+```
