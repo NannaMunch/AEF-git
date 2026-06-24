@@ -1,11 +1,12 @@
 ---
 title: Exam 2026, Part 2
 author: Exam number 45, 46 & 47
-date: 2026-26-06
+date: 2026-06-26
 date-format: MMMM DD, YYYY
 execute: 
   echo: false
   warning: false
+  cache: true
 format:
   pdf: 
     titlepage: true
@@ -53,7 +54,7 @@ from sklearn.metrics import root_mean_squared_error
 
 ```{python}
 # ------------------------------------------------------------
-# 1. Load high-frequency minute price data
+# Load high-frequency minute price data
 # ------------------------------------------------------------
 
 data_path = Path("/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Eksamen/hf_minute_prices.parquet")
@@ -100,11 +101,11 @@ $$
 RV_d^{(\Delta)} = \sum_j \left(r_{d,j}^{(\Delta)}\right)^2,
 $$
 
-where $r_{d,j}^{(\Delta)}$ is the intraday log return over sampling interval.
+where \(r_{d,j}^{(\Delta)}\) is the intraday log return over sampling interval.
 
 ```{python}
 # ------------------------------------------------------------
-# 2. Keep AAPL only and sort by timestamp
+# Keep AAPL only and sort by timestamp
 # ------------------------------------------------------------
 
 aapl_raw = (
@@ -121,7 +122,7 @@ aapl_raw["log_price"] = np.log(aapl_raw["price"])
 
 ```{python}
 # ------------------------------------------------------------
-# 3. Check missing minute observations before forward-filling
+# Check missing minute observations before forward-filling
 # ------------------------------------------------------------
 
 def missing_minutes_one_day(group):
@@ -181,7 +182,7 @@ overall_missing_share = (
 
 ```{python}
 # ------------------------------------------------------------
-# 4. Create regular one-minute grid and forward-fill missing prices
+# Create regular one-minute grid and forward-fill missing prices
 # ------------------------------------------------------------
 
 # Create the fixed intraday minute grid.
@@ -259,7 +260,7 @@ minute_check = (
 
 ```{python}
 # ------------------------------------------------------------
-# 5. Function to compute daily realized variance
+# Function to compute daily realized variance
 # ------------------------------------------------------------
 
 def compute_daily_rv(data, sampling_minutes):
@@ -317,7 +318,7 @@ def compute_daily_rv(data, sampling_minutes):
 
 ```{python}
 # ------------------------------------------------------------
-# 6. Compute realized variance for all sampling intervals
+# Compute realized variance for all sampling intervals
 # ------------------------------------------------------------
 
 sampling_intervals = [1, 2, 5, 10, 15, 30, 60]
@@ -333,7 +334,7 @@ rv_all = pd.concat(
 
 ```{python}
 # ------------------------------------------------------------
-# 7. Average realized variance and estimation uncertainty
+# Average realized variance and estimation uncertainty
 # ------------------------------------------------------------
 rv_summary = (
     rv_all
@@ -360,7 +361,7 @@ As shown in @fig-aapl-volatility-signature, average realized variance is highest
 #| fig-align: center
 
 # ------------------------------------------------------------
-# 8. Volatility signature plot with error bars
+# Volatility signature plot with error bars
 # ------------------------------------------------------------
 
 plt.figure(figsize=(8, 5))
@@ -385,6 +386,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 ```
+
 The volatility signature plot shows that the average realized variance is highest at the shortest sampling intervals and falls substantially when moving from 1-minute to 5-minute sampling. This is consistent with the presence of market microstructure noise at very high frequencies. In the lecture slides, the observed log price is written as the latent efficient log price plus a noise component, $Y_{i\Delta_n}=X_{i\Delta_n}+U_{i\Delta_n}$, and the noise-driven fraction of return variance increases as $\Delta_n$ becomes small. Sampling less frequently therefore reduces the influence of bid-ask bounce, price discreteness and stale prices.
 
 We choose the standard realized variance estimator based on 5-minute log returns for the remainder of the analysis:
@@ -395,208 +397,213 @@ $$
 
 This choice is also consistent with the empirical realized-volatility literature, where 5-minute returns are commonly used as a practical compromise between using high-frequency information and limiting market microstructure noise. Andersen and Bollerslev discuss the use of high-frequency intraday returns to obtain improved volatility measurements and refer to empirical analysis based on five-minute returns. At the same time, 5-minute sampling leaves approximately $390/5-1=77$ intraday returns per trading day. Since the subsequent realized covariance matrix is 30-dimensional, this helps avoid the rank problem emphasized in the lecture slides: when the return matrix has $T<N$, the sample covariance matrix is singular and cannot be inverted. Thus, 5-minute sampling is preferred to lower-frequency choices such as 15, 30 or 60 minutes, which would leave fewer intraday returns for estimating the $30 \times 30$ covariance matrix.
 
+## Exercise 2a: Daily realized covariance matrices
 
-## Exercise 2: Daily realized covariance
+We extend the realized variance estimator from Exercise 1 to the multivariate setting and estimate a daily realized covariance matrix for the 30 DJIA constituents.
 
-We extend the realized variance approach to compute daily realized covariance matrices for all 30 DJIA constituents. The realized covariance matrix is defined as:
+Let $r_{d,j}$ denote the $30 \times 1$ vector of synchronized 5-minute log returns at intraday interval $j$ on trading day $d$. The realized covariance matrix is computed as
 
 $$
-RC_d = \sum_j \mathbf{r}_{d,j} \mathbf{r}_{d,j}^T,
+RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}'.
 $$
 
-where $\mathbf{r}_{d,j} \in \mathbb{R}^{30}$ is the vector of intraday log-returns for all 30 stocks over sampling interval $j$ on day $d$.
+This is the multivariate analogue of the realized variance estimator used in Exercise 1.
 
-We use the same fixed 5-minute sampling grid as established in Exercise 1. This frequency is critical for covariance estimation: at very fine sampling intervals (1 minute), bid-ask bounce and price discreteness induce negative first-order autocovariance in returns, biasing correlations downward by 15–20%. This would render the covariance matrix unsuitable for portfolio optimization. At 5-minute frequency, this microstructure noise is substantially eliminated, revealing the true correlation structure.
+The data are available at the minute frequency rather than at the transaction level. To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day. Missing prices are handled using previous-tick interpolation (forward filling), meaning that the most recently observed price within the same trading day is carried forward. Prices are never carried across trading days.
 
-### Computing the realized covariance matrices
+After synchronization, prices are sampled every five minutes and converted into log returns. The 5-minute frequency is chosen based on the volatility signature plot in Exercise 1 and is also consistent with the realized-volatility literature, where 5-minute returns are commonly used as a compromise between reducing market microstructure noise and retaining intraday information.
+
+For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors.
 
 ```{python}
-# Use all 30 DJIA stocks
-all_stocks_raw = hf_prices.copy()
+# ------------------------------------------------------------
+# Exercise 2a: Daily realized covariance matrices
+# ------------------------------------------------------------
 
-# Create a synchronized fixed-grid for all stocks
-# This ensures returns are computed on the same timestamps across all 30 stocks
+# Use the sampling interval chosen in Exercise 1
+DELTA = 5
 
-intraday_times_5min = pd.date_range(
+symbols = np.sort(hf_prices["symbol"].unique())
+trading_days_all = np.sort(hf_prices["trading_day"].unique())
+
+# Create one-minute intraday grid
+intraday_times = pd.date_range(
     start=f"2000-01-01 {MARKET_OPEN}",
     end=f"2000-01-01 {MARKET_CLOSE}",
-    freq="5min"
+    freq="1min"
 ).time
 
-trading_days = np.sort(all_stocks_raw["trading_day"].unique())
-
-grid_5min = pd.MultiIndex.from_product(
-    [trading_days, intraday_times_5min],
+# Full grid: trading day x intraday minute
+grid = pd.MultiIndex.from_product(
+    [trading_days_all, intraday_times],
     names=["trading_day", "time"]
 ).to_frame(index=False)
 
-grid_5min["ts"] = pd.to_datetime(
-    grid_5min["trading_day"].astype(str) + " " + grid_5min["time"].astype(str)
+grid["ts"] = pd.to_datetime(
+    grid["trading_day"].astype(str) + " " + grid["time"].astype(str)
 )
 
 if TS_TZ is not None:
-    grid_5min["ts"] = grid_5min["ts"].dt.tz_localize(TS_TZ)
+    grid["ts"] = grid["ts"].dt.tz_localize(TS_TZ)
 
-# Prepare all stocks' prices for merging
-all_for_merge = (
-    all_stocks_raw
-    .copy()
-    .assign(time=lambda x: x["ts"].dt.time)
-    [["symbol", "trading_day", "time", "price"]]
+grid["minutes_since_open"] = (
+    grid
+    .groupby("trading_day")
+    .cumcount()
 )
 
-# Merge all stocks onto the synchronized grid
-all_minute_5min = (
-    grid_5min
-    .merge(
-        all_for_merge,
-        on=["trading_day", "time"],
-        how="left"
+full_index = pd.MultiIndex.from_frame(
+    grid[["trading_day", "ts"]]
+)
+
+# Put prices in wide format once:
+# rows = trading day and timestamp
+# columns = stocks
+prices_wide_raw = (
+    hf_prices
+    .pivot_table(
+        index=["trading_day", "ts"],
+        columns="symbol",
+        values="price",
+        aggfunc="last"
     )
-    .sort_values(["symbol", "trading_day", "ts"])
-    .copy()
+    .sort_index()
 )
 
-# Forward-fill prices within each stock and trading day
-all_minute_5min["price"] = (
-    all_minute_5min
-    .groupby(["symbol", "trading_day"])["price"]
+# Reindex to full one-minute grid
+prices_wide = (
+    prices_wide_raw
+    .reindex(full_index)
+    .sort_index()
+)
+
+# Previous-tick interpolation within each trading day only
+prices_wide = (
+    prices_wide
+    .groupby(level="trading_day")
     .ffill()
 )
 
-# Drop missing prices before first observed price
-all_minute_5min = (
-    all_minute_5min
-    .dropna(subset=["price"])
-    .sort_values(["trading_day", "symbol", "ts"])
-    .reset_index(drop=True)
+# Fixed stock order
+prices_wide = prices_wide[symbols]
+
+# Select 5-minute timestamps
+sample_grid = grid.loc[
+    grid["minutes_since_open"] % DELTA == 0,
+    ["trading_day", "ts"]
+]
+
+sample_index = pd.MultiIndex.from_frame(sample_grid)
+
+# Sample log prices
+sampled_log_prices = np.log(
+    prices_wide.loc[sample_index]
 )
 
-all_minute_5min["log_price"] = np.log(all_minute_5min["price"])
-```
+# Intraday log returns within each trading day
+returns_wide = (
+    sampled_log_prices
+    .groupby(level="trading_day")
+    .diff()
+)
 
-```{python}
 # Compute daily realized covariance matrices
+rc_matrices = {}
+rc_diagnostics = []
 
-def compute_daily_rcov(group_day):
-    """
-    Compute the 30x30 realized covariance matrix for one trading day.
+for trading_day, returns_day in returns_wide.groupby(level="trading_day"):
     
-    The group contains all 30 stocks on a synchronized 5-minute grid.
-    """
+    returns_day = returns_day.droplevel("trading_day")
+    returns_day = returns_day.dropna(how="any")
     
-    trading_day = group_day["trading_day"].iloc[0]
+    if len(returns_day) < 2:
+        continue
     
-    # Pivot to wide format: rows = time steps, columns = stocks
-    prices_wide = group_day.pivot_table(
-        index="ts",
-        columns="symbol",
-        values="log_price",
-        aggfunc="first"
+    R = returns_day[symbols].to_numpy()
+    
+    # Realized covariance matrix:
+    # RC_d = sum_j r_{d,j} r_{d,j}'
+    rc_day = R.T @ R
+    
+    rc_matrices[trading_day] = pd.DataFrame(
+        rc_day,
+        index=symbols,
+        columns=symbols
     )
     
-    # Compute log-returns
-    returns_wide = prices_wide.diff().dropna()
-    
-    if len(returns_wide) < 2:
-        return None
-    
-    # Compute covariance matrix
-    try:
-        rcov_matrix = np.cov(returns_wide.values.T, ddof=1)
-        
-        return {
-            "trading_day": trading_day,
-            "rcov_matrix": rcov_matrix,
-            "n_obs": len(returns_wide),
-            "stocks": returns_wide.columns.tolist()
+    rc_diagnostics.append({
+        "trading_day": trading_day,
+        "n_returns": len(returns_day),
+        "matrix_rank": np.linalg.matrix_rank(rc_day),
+        "min_eigenvalue": np.linalg.eigvalsh(rc_day).min()
+    })
+
+rc_diagnostics = pd.DataFrame(rc_diagnostics)
+```
+
+## Exercise 2b: Diagonal elements of the realized covariance matrix
+The diagonal elements of the realized covariance matrix $RC_d$ are the daily realized variances of the individual stocks. For stock $i$, the diagonal element is
+
+$$
+RC_{d,ii} = \sum_{j=1}^{M_d} r_{d,j,i}^2.
+$$
+
+Thus, by extracting the diagonal of each daily realized covariance matrix, we obtain a time series of daily realized variance for each of the 30 stocks.
+
+```{python}
+# ------------------------------------------------------------
+# Exercise 2b: Extract diagonal elements from RC_d
+# ------------------------------------------------------------
+
+rv_by_stock = pd.DataFrame(
+    [
+        {
+            "trading_day": day,
+            **dict(zip(symbols, np.diag(rc_matrix.values)))
         }
-    except:
-        return None
+        for day, rc_matrix in rc_matrices.items()
+    ]
+)
 
-# Compute RC matrix for each trading day
-rcov_results = []
+rv_by_stock["trading_day"] = pd.to_datetime(rv_by_stock["trading_day"])
 
-for trading_day, group_day in all_minute_5min.groupby("trading_day"):
-    result = compute_daily_rcov(group_day)
-    if result is not None:
-        rcov_results.append(result)
-
-print(f"Computed {len(rcov_results)} daily realized covariance matrices")
-
-# Verify matrix properties
-if len(rcov_results) > 0:
-    first_rcov = rcov_results[0]["rcov_matrix"]
-    rank = np.linalg.matrix_rank(first_rcov)
-    eigenvalues = np.linalg.eigvals(first_rcov)
-    print(f"Matrix rank: {rank} (dimension: {first_rcov.shape})")
-    print(f"Positive semi-definite: {np.all(eigenvalues >= -1e-10)}")
-```
-
-### Diagonal elements: realized variance of each stock
-
-We extract the diagonal elements of each daily realized covariance matrix, which represent the daily realized variance of each individual stock.
-
-```{python}
-# Extract diagonal elements (daily realized variances)
-
-rv_diagonal_data = []
-
-for result in rcov_results:
-    trading_day = result["trading_day"]
-    rcov_matrix = result["rcov_matrix"]
-    stocks = result["stocks"]
-    
-    diag_elements = np.diag(rcov_matrix)
-    
-    for i, stock in enumerate(stocks):
-        rv_diagonal_data.append({
-            "trading_day": trading_day,
-            "symbol": stock,
-            "realized_variance": diag_elements[i]
-        })
-
-rv_diagonal = pd.DataFrame(rv_diagonal_data)
-rv_diagonal["trading_day"] = pd.to_datetime(rv_diagonal["trading_day"])
-
-print(f"Extracted {len(rv_diagonal):,} daily realized variance observations")
-```
-
-```{python}
-#| label: fig-all-stocks-rv
-#| fig-cap: "Time series of realized variance for all 30 DJIA stocks (5-minute frequency)."
-#| fig-align: center
-
-# Plot realized variance time series for all 30 stocks
-
-plt.figure(figsize=(12, 6))
-
-for stock in sorted(rv_diagonal["symbol"].unique()):
-    stock_data = rv_diagonal[rv_diagonal["symbol"] == stock].sort_values("trading_day")
-    plt.plot(
-        stock_data["trading_day"],
-        stock_data["realized_variance"],
-        label=stock,
-        linewidth=0.7,
-        alpha=0.7
+rv_long = (
+    rv_by_stock
+    .melt(
+        id_vars="trading_day",
+        value_vars=symbols,
+        var_name="symbol",
+        value_name="realized_variance"
     )
-
-plt.xlabel("Trading day")
-plt.ylabel("Daily realized variance")
-plt.title("Realized variance over time — all 30 DJIA stocks (5-minute frequency)")
-plt.legend(ncol=3, fontsize=8, loc="upper left")
-plt.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
+)
 ```
 
-### Patterns and interpretation
+```{python}
+#| label: fig-realized-variances-30-stocks
+#| fig-cap: "Daily realized variances for the 30 DJIA stocks."
+#| fig-align: center
+#| fig-pos: "H"
 
-The realized variances in Figure @fig-all-stocks-rv exhibit pronounced volatility clustering, with elevated variance persisting during crisis periods (2008–2009, March 2020) before mean-reverting gradually. Technology stocks (AMZN, NVDA) show substantially higher mean realized variance than defensive stocks (JNJ, KO), reflecting differences in firm risk. All 30 stocks synchronize during market-wide shocks, indicating a strong common volatility factor.
+import matplotlib.pyplot as plt
 
-### Microstructure noise: frequency selection
+plt.close('all')
 
-At 1-minute frequency, realized variance inflates to 0.000298 versus 0.000245 at 5-minute—a 22% microstructure effect. Bid-ask bounce induces negative autocovariance, systematically biasing correlations downward by 15–20% at 1-minute frequency. This bias would underestimate true co-movement and produce poorly diversified portfolios. At 5-minute frequency, this noise is eliminated, enabling reliable estimation of minimum-variance portfolios for Exercises 3–5.
+rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
 
-Hej ESME
+# Create ONE figure with all 30 stocks
+fig, ax = plt.subplots(figsize=(14, 7))
+
+# Plot each stock's realized variance as a line
+for symbol in symbols:
+    stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
+    ax.plot(stock_data["trading_day"], stock_data["realized_variance"], 
+            label=symbol, linewidth=1, alpha=0.7)
+
+ax.set_xlabel("Trading Day", fontsize=11)
+ax.set_ylabel("Realized Variance", fontsize=11)
+ax.set_title("Daily realized variances for the 30 DJIA stocks", fontsize=12)
+ax.legend(ncol=6, fontsize=8, loc="upper left", bbox_to_anchor=(0, 1))
+ax.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+fig.tight_layout()
+```
