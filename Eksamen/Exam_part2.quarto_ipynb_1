@@ -7,7 +7,7 @@
         "---\n",
         "title: Exam 2026, Part 2\n",
         "author: Exam number 45, 46 & 47\n",
-        "date: 2026-06-26\n",
+        "date: 2026-26-06\n",
         "date-format: MMMM DD, YYYY\n",
         "execute: \n",
         "  echo: false\n",
@@ -30,7 +30,7 @@
         "    highlight-style: github-light\n",
         "---"
       ],
-      "id": "e466a220"
+      "id": "9e4d64bc"
     },
     {
       "cell_type": "code",
@@ -61,7 +61,7 @@
         "from sklearn.ensemble import RandomForestRegressor\n",
         "from sklearn.metrics import root_mean_squared_error"
       ],
-      "id": "3f2fc855",
+      "id": "0755ad93",
       "execution_count": null,
       "outputs": []
     },
@@ -73,7 +73,7 @@
         "# 1. Load high-frequency minute price data\n",
         "# ------------------------------------------------------------\n",
         "\n",
-        "data_path = Path(\"/Users/AstridMoeller/AEF/data/hf_minute_prices.parquet\")\n",
+        "data_path = Path(\"/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Eksamen/hf_minute_prices.parquet\")\n",
         "\n",
         "hf_prices = pd.read_parquet(data_path)\n",
         "\n",
@@ -103,7 +103,7 @@
         "    \"\"\"\n",
         "    return pd.Timestamp(f\"{trading_day} {clock_time}\", tz=TS_TZ)"
       ],
-      "id": "0e126f38",
+      "id": "a1b95790",
       "execution_count": null,
       "outputs": []
     },
@@ -124,9 +124,9 @@
         "RV_d^{(\\Delta)} = \\sum_j \\left(r_{d,j}^{(\\Delta)}\\right)^2,\n",
         "$$\n",
         "\n",
-        "where \\(r_{d,j}^{(\\Delta)}\\) is the intraday log return over sampling interval."
+        "where $r_{d,j}^{(\\Delta)}$ is the intraday log return over sampling interval."
       ],
-      "id": "7272b476"
+      "id": "6c86925c"
     },
     {
       "cell_type": "code",
@@ -147,7 +147,7 @@
         "# High-frequency realized variance is based on log returns\n",
         "aapl_raw[\"log_price\"] = np.log(aapl_raw[\"price\"])"
       ],
-      "id": "e3283058",
+      "id": "d67c5f05",
       "execution_count": null,
       "outputs": []
     },
@@ -212,7 +212,7 @@
         "    / aapl_missing_by_day[\"expected_minutes\"].sum()\n",
         ")"
       ],
-      "id": "a6297f61",
+      "id": "e3b16d3a",
       "execution_count": null,
       "outputs": []
     },
@@ -296,7 +296,7 @@
         "    .reset_index()\n",
         ")"
       ],
-      "id": "bc8d92fc",
+      "id": "5d950f91",
       "execution_count": null,
       "outputs": []
     },
@@ -360,7 +360,7 @@
         "\n",
         "    return rv_daily"
       ],
-      "id": "674e8f25",
+      "id": "85163be9",
       "execution_count": null,
       "outputs": []
     },
@@ -382,7 +382,7 @@
         "    ignore_index=True\n",
         ")"
       ],
-      "id": "e1b68c38",
+      "id": "c6e8cffa",
       "execution_count": null,
       "outputs": []
     },
@@ -409,7 +409,7 @@
         "rv_summary[\"ci_lower\"] = rv_summary[\"mean_rv\"] - 1.96 * rv_summary[\"se_rv\"]\n",
         "rv_summary[\"ci_upper\"] = rv_summary[\"mean_rv\"] + 1.96 * rv_summary[\"se_rv\"]"
       ],
-      "id": "04e751e9",
+      "id": "2bf7dd89",
       "execution_count": null,
       "outputs": []
     },
@@ -419,7 +419,7 @@
       "source": [
         "As shown in @fig-aapl-volatility-signature, average realized variance is highest at the shortest sampling intervals and decreases as the sampling interval increases. This pattern is consistent with market microstructure noise at very high frequencies, such as bid-ask bounce, price discreteness, and stale prices. At very fine sampling intervals, these frictions can inflate realized variance because observed transaction prices deviate from the latent efficient price. Sampling less frequently reduces this noise, but very long sampling intervals also discard useful intraday information."
       ],
-      "id": "a33ed765"
+      "id": "23727c93"
     },
     {
       "cell_type": "code",
@@ -477,7 +477,7 @@
         "\n",
         "### Computing the realized covariance matrices"
       ],
-      "id": "fb9c93ee"
+      "id": "306163cd"
     },
     {
       "cell_type": "code",
@@ -546,7 +546,7 @@
         "\n",
         "all_minute_5min[\"log_price\"] = np.log(all_minute_5min[\"price\"])"
       ],
-      "id": "47b6152e",
+      "id": "85db78e6",
       "execution_count": null,
       "outputs": []
     },
@@ -610,7 +610,7 @@
         "    print(f\"Matrix rank: {rank} (dimension: {first_rcov.shape})\")\n",
         "    print(f\"Positive semi-definite: {np.all(eigenvalues >= -1e-10)}\")"
       ],
-      "id": "c078eadf",
+      "id": "58fb89b8",
       "execution_count": null,
       "outputs": []
     },
@@ -622,7 +622,7 @@
         "\n",
         "We extract the diagonal elements of each daily realized covariance matrix, which represent the daily realized variance of each individual stock."
       ],
-      "id": "cddfe316"
+      "id": "09857a8e"
     },
     {
       "cell_type": "code",
@@ -651,7 +651,7 @@
         "\n",
         "print(f\"Extracted {len(rv_diagonal):,} daily realized variance observations\")"
       ],
-      "id": "0575b09d",
+      "id": "72911fd7",
       "execution_count": null,
       "outputs": []
     },
@@ -702,7 +702,7 @@
         "\n",
         "At 1-minute frequency, realized variance inflates to 0.000298 versus 0.000245 at 5-minute—a 22% microstructure effect. Bid-ask bounce induces negative autocovariance, systematically biasing correlations downward by 15–20% at 1-minute frequency. This bias would underestimate true co-movement and produce poorly diversified portfolios. At 5-minute frequency, this noise is eliminated, enabling reliable estimation of minimum-variance portfolios for Exercises 3–5."
       ],
-      "id": "8982c71d"
+      "id": "eafd8017"
     }
   ],
   "metadata": {
