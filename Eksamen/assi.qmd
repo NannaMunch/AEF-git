@@ -57,7 +57,7 @@ from sklearn.metrics import root_mean_squared_error
 # Load high-frequency minute price data
 # ------------------------------------------------------------
 
-data_path = Path("/Users/AstridMoeller/AEF/data/hf_minute_prices.parquet")
+data_path = Path("/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Eksamen/hf_minute_prices.parquet")
 
 hf_prices = pd.read_parquet(data_path)
 
@@ -572,44 +572,30 @@ rv_long = (
 
 ```{python}
 #| label: fig-realized-variances-30-stocks
-#| fig-cap: "Daily realized variances for the 30 DJIA stocks. Each line shows the diagonal element of the daily realized covariance matrix for one stock."
+#| fig-cap: "Daily realized variances for the 30 DJIA stocks."
 #| fig-align: center
 #| fig-pos: "H"
 
-# ------------------------------------------------------------
-# Exercise 2b: Plot daily realized variances for all 30 stocks
-# ------------------------------------------------------------
+import matplotlib.pyplot as plt
 
-plt.figure(figsize=(10, 5.5))
+plt.close('all')
 
 rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
 
+# Create ONE figure with all 30 stocks
+fig, ax = plt.subplots(figsize=(14, 7))
+
+# Plot each stock's realized variance as a line
 for symbol in symbols:
-    
     stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
-    
-    plt.plot(
-        stock_data["trading_day"],
-        stock_data["realized_variance"],
-        linewidth=0.7,
-        alpha=0.65,
-        label=symbol
-    )
+    ax.plot(stock_data["trading_day"], stock_data["realized_variance"], 
+            label=symbol, linewidth=1, alpha=0.7)
 
-plt.xlabel("Trading day")
-plt.ylabel("Daily realized variance")
-plt.title("Daily realized variances for the 30 DJIA stocks")
-plt.grid(True, alpha=0.3)
-
-# Put legend outside the plot to avoid covering the lines
-plt.legend(
-    loc="center left",
-    bbox_to_anchor=(1.02, 0.5),
-    fontsize=6,
-    ncol=1,
-    frameon=False
-)
-
-plt.tight_layout()
-plt.show()
+ax.set_xlabel("Trading Day", fontsize=11)
+ax.set_ylabel("Realized Variance", fontsize=11)
+ax.set_title("Daily realized variances for the 30 DJIA stocks", fontsize=12)
+ax.legend(ncol=6, fontsize=8, loc="upper left", bbox_to_anchor=(0, 1))
+ax.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+fig.tight_layout()
 ```
