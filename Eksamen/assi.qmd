@@ -6,6 +6,7 @@ date-format: MMMM DD, YYYY
 execute: 
   echo: false
   warning: false
+  cache: true
 format:
   pdf: 
     titlepage: true
@@ -49,6 +50,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import ElasticNet
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import root_mean_squared_error
+from sklearn.covariance import LedoitWolf
 ```
 
 ```{python}
@@ -100,7 +102,7 @@ $$
 RV_d^{(\Delta)} = \sum_j \left(r_{d,j}^{(\Delta)}\right)^2,
 $$
 
-where \(r_{d,j}^{(\Delta)}\) is the intraday log return over sampling interval.
+where $r_{d,j}^{(\Delta)}$ is the intraday log return over sampling interval.
 
 ```{python}
 # ------------------------------------------------------------
@@ -384,4 +386,58 @@ plt.legend()
 
 plt.tight_layout()
 plt.show()
+```
+
+
+## Exercise 3:
+
+```{python}
+# ------------------------------------------------------------
+# Exercise 3: Daily close-to-close returns
+# ------------------------------------------------------------
+
+# Use the last intraday price for each stock on each trading day
+daily_close = (
+    hf_prices
+    .sort_values(["symbol", "trading_day", "ts"])
+    .groupby(["trading_day", "symbol"], as_index=False)
+    .last()
+)
+
+# Convert to wide format: rows = trading days, columns = stocks
+daily_prices_wide = (
+    daily_close
+    .pivot(index="trading_day", columns="symbol", values="price")
+    .sort_index()
+)
+
+# Daily close-to-close log returns
+daily_returns = (
+    np.log(daily_prices_wide)
+    .diff()
+    .dropna()
+)
+
+# Keep stock order fixed throughout the exercise
+symbols = daily_returns.columns.tolist()
+```
+
+```{python}
+# ------------------------------------------------------------
+# Evaluation window: second half of the sample
+# ------------------------------------------------------------
+
+all_return_days = daily_returns.index.to_list()
+
+# Start the evaluation window in the second half of the sample
+eval_start_position = len(all_return_days) // 2
+evaluation_days = all_return_days[eval_start_position:]
+```
+
+```{python}
+# ------------------------------------------------------------
+# Rolling-window length for Ledoit-Wolf estimator
+# ------------------------------------------------------------
+
+W = 252
 ```
