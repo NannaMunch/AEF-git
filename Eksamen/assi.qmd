@@ -57,7 +57,7 @@ from sklearn.metrics import root_mean_squared_error
 # Load high-frequency minute price data
 # ------------------------------------------------------------
 
-data_path = Path("/Users/AstridMoeller/AEF/data/hf_minute_prices.parquet")
+data_path = Path("/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Eksamen/hf_minute_prices.parquet")
 
 hf_prices = pd.read_parquet(data_path)
 
@@ -572,61 +572,30 @@ rv_long = (
 
 ```{python}
 #| label: fig-realized-variances-30-stocks
-#| fig-cap: "Daily realized variances for the 30 DJIA stocks. Each panel shows the diagonal element of the daily realized covariance matrix for one stock."
+#| fig-cap: "Daily realized variances for the 30 DJIA stocks."
 #| fig-align: center
 #| fig-pos: "H"
 
-# ------------------------------------------------------------
-# Exercise 2b: Plot daily realized variances for all 30 stocks
-# ------------------------------------------------------------
-
-import math
 import matplotlib.pyplot as plt
 
-# Sort data for plotting
+plt.close('all')
+
 rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
 
-# Create one panel per stock
-n_stocks = len(symbols)
-n_cols = 5
-n_rows = math.ceil(n_stocks / n_cols)
+# Create ONE figure with all 30 stocks
+fig, ax = plt.subplots(figsize=(14, 7))
 
-fig, axes = plt.subplots(
-    n_rows,
-    n_cols,
-    figsize=(12, 10),
-    sharex=True
-)
-
-axes = axes.flatten()
-
-for i, symbol in enumerate(symbols):
-    
-    ax = axes[i]
-    
+# Plot each stock's realized variance as a line
+for symbol in symbols:
     stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
-    
-    ax.plot(
-        stock_data["trading_day"],
-        stock_data["realized_variance"],
-        linewidth=0.8
-    )
-    
-    ax.set_title(symbol, fontsize=8)
-    ax.tick_params(axis="x", labelrotation=45, labelsize=6)
-    ax.tick_params(axis="y", labelsize=6)
-    ax.grid(True, alpha=0.3)
+    ax.plot(stock_data["trading_day"], stock_data["realized_variance"], 
+            label=symbol, linewidth=1, alpha=0.7)
 
-# Remove unused subplots if any
-for j in range(n_stocks, len(axes)):
-    fig.delaxes(axes[j])
-
-fig.suptitle(
-    "Daily realized variances for the 30 DJIA stocks",
-    fontsize=12,
-    y=0.995
-)
-
-fig.tight_layout(rect=[0, 0, 1, 0.98])
-plt.show()
+ax.set_xlabel("Trading Day", fontsize=11)
+ax.set_ylabel("Realized Variance", fontsize=11)
+ax.set_title("Daily realized variances for the 30 DJIA stocks", fontsize=12)
+ax.legend(ncol=6, fontsize=8, loc="upper left", bbox_to_anchor=(0, 1))
+ax.grid(True, alpha=0.3)
+plt.xticks(rotation=45)
+fig.tight_layout()
 ```
