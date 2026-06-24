@@ -35,6 +35,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import tidyfinance as tf
+import math
+import matplotlib.pyplot as plt
 
 # plotting
 from plotnine import *
@@ -50,6 +52,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import ElasticNet
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import root_mean_squared_error
+from sklearn.covariance import LedoitWolf
+
 ```
 
 ```{python}
@@ -57,7 +61,7 @@ from sklearn.metrics import root_mean_squared_error
 # Load high-frequency minute price data
 # ------------------------------------------------------------
 
-data_path = Path("/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Eksamen/hf_minute_prices.parquet")
+data_path = Path("/Users/esmeraldalarsson/Desktop/hf_minute_prices.parquet")
 
 hf_prices = pd.read_parquet(data_path)
 
@@ -399,19 +403,17 @@ This choice is also consistent with the empirical realized-volatility literature
 
 ## Exercise 2a: Daily realized covariance matrices
 
-We extend the realized variance estimator from Exercise 1 to the multivariate setting and estimate a daily realized covariance matrix for the 30 DJIA constituents.
-
-Let $r_{d,j}$ denote the $30 \times 1$ vector of synchronized 5-minute log returns at intraday interval $j$ on trading day $d$. The realized covariance matrix is computed as
+We estimate the daily realized covariance matrix for the 30 DJIA stocks using the standard realized covariance estimator
 
 $$
-RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}'.
+RC_d = \sum_{j=1}^{M_d} r_{d,j} r_{d,j}',
 $$
 
-This is the multivariate analogue of the realized variance estimator used in Exercise 1.
+where $r_{d,j}$ denotes the $30 \times 1$ vector of synchronized intraday log returns at interval $j$ on trading day $d$. This estimator is the multivariate analogue of the realized variance estimator used in Exercise 1.
 
-The data are available at the minute frequency rather than at the transaction level. To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day. Missing prices are handled using previous-tick interpolation (forward filling), meaning that the most recently observed price within the same trading day is carried forward. Prices are never carried across trading days.
+Following Exercise 1, covariance is estimated using synchronized 5-minute returns. The same sampling frequency is used throughout the remainder of the analysis, ensuring consistency with the realized variance estimator selected based on the volatility signature plot.
 
-After synchronization, prices are sampled every five minutes and converted into log returns. The 5-minute frequency is chosen based on the volatility signature plot in Exercise 1 and is also consistent with the realized-volatility literature, where 5-minute returns are commonly used as a compromise between reducing market microstructure noise and retaining intraday information.
+To synchronize observations across stocks, prices are placed on a common one-minute calendar grid within each trading day and missing observations are handled using previous-tick interpolation (forward filling). Returns are then computed on a common 5-minute grid, ensuring that the covariance matrix is based on synchronized return vectors.
 
 For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors.
 
@@ -583,27 +585,661 @@ rv_long = (
 #| fig-cap: "Daily realized variances for the 30 DJIA stocks."
 #| fig-align: center
 #| fig-pos: "H"
+#| fig-width: 12
+#| fig-height: 7
 
-import matplotlib.pyplot as plt
 
-plt.close('all')
+plt.close("all")
 
 rv_long_plot = rv_long.sort_values(["symbol", "trading_day"]).copy()
 
-# Create ONE figure with all 30 stocks
 fig, ax = plt.subplots(figsize=(14, 7))
 
-# Plot each stock's realized variance as a line
 for symbol in symbols:
-    stock_data = rv_long_plot[rv_long_plot["symbol"] == symbol]
-    ax.plot(stock_data["trading_day"], stock_data["realized_variance"], 
-            label=symbol, linewidth=1, alpha=0.7)
 
-ax.set_xlabel("Trading Day", fontsize=11)
-ax.set_ylabel("Realized Variance", fontsize=11)
-ax.set_title("Daily realized variances for the 30 DJIA stocks", fontsize=12)
-ax.legend(ncol=6, fontsize=8, loc="upper left", bbox_to_anchor=(0, 1))
+    stock_data = rv_long_plot[
+        rv_long_plot["symbol"] == symbol
+    ]
+
+    ax.plot(
+        stock_data["trading_day"],
+        stock_data["realized_variance"],
+        label=symbol,
+        linewidth=0.8,
+        alpha=0.7
+    )
+
+ax.set_xlabel("Trading day")
+ax.set_ylabel("Realized variance")
+ax.set_title("Daily realized variances for the 30 DJIA stocks")
+
 ax.grid(True, alpha=0.3)
+
+ax.legend(
+    loc="upper right",
+    ncol=3,
+    fontsize=7,
+    frameon=True
+)
+
 plt.xticks(rotation=45)
+
 fig.tight_layout()
+
+plt.show()
 ```
+
+The realized variance series exhibit clear volatility clustering, with periods of high volatility followed by further periods of high volatility and vice versa. Several stocks experience large volatility spikes during periods of market stress, indicating that volatility tends to increase simultaneously across assets.
+
+The figure also shows substantial time variation in realized variance, suggesting that volatility is far from constant over time. While the overall patterns are similar across stocks, some stocks display persistently higher realized variance than others, reflecting differences in underlying risk characteristics.
+
+By sampling at a one-minute frequency instead, the off-diagonal elements of $RC_d$ would likely be more affected by market microstructure noise. As discussed in the lecture slides, Andersen and Bollerslev (1998), and Barndorff-Nielsen et al. (2011), covariance estimates at very high frequencies can suffer from the Epps effect, whereby the measured dependence between assets is biased downward. Although the DJIA data are recorded on a common one-minute grid and therefore largely mitigate the non-synchronous trading problem, one-minute returns remain more sensitive to bid-ask bounce and price discreteness. Consequently, the off-diagonal elements of $RC_d$ may become noisier and potentially lower than those obtained from synchronized five-minute returns. This provides additional support for the five-minute sampling frequency selected in Exercise 1.
+
+## Exercise 3: Covariance estimators
+
+For each day $t$ in the second half of the sample, we construct two estimators of today’s covariance matrix using only information available up to day $t-1$.
+
+```{python}
+# Evaluation period: second half of the sample, so first choosing what data we have and then which we evaluate
+
+# Trading days for which realized covariance matrices are available
+rc_days = sorted(rc_matrices.keys())
+
+# Use the second half of the realized-covariance sample
+eval_start = len(rc_days) // 2
+evaluation_days = rc_days[eval_start:]
+```
+
+### Exercise 3a: High-frequency random walk estimator
+The high-frequency estimator is defined as
+
+$$
+\hat{\Sigma}^{HF}_t = RC_{t-1}.
+$$
+
+Thus, yesterday’s realized covariance matrix is used as today’s covariance forecast. This implies that the covariance matrix follows a random-walk process, such that changes in covariance are unpredictable and arise only from new shocks or information. Consequently, yesterday’s realized covariance matrix provides the best forecast of today’s covariance matrix. This assumption is motivated by the persistence and clustering typically observed in volatility and covariance dynamics.
+
+```{python}
+# 3a. High-frequency random walk covariance estimator
+hf_covariances = {}
+
+for i in range(1, len(rc_days)):
+    
+    trading_day = rc_days[i]
+    previous_day = rc_days[i - 1]
+    
+    if trading_day not in evaluation_days:
+        continue
+    
+    hf_covariances[trading_day] = rc_matrices[previous_day]
+```
+
+### Exercise 3b: Ledoit-Wolf shrinkage estimator
+For the Ledoit-Wolf estimator, we first construct daily close-to-close log returns for all 30 stocks using the last observed intraday price on each trading day. For each evaluation day $t$, the Ledoit-Wolf covariance matrix is estimated from a rolling window of $W=252$ daily returns ending on day $t-1$. Thus, only information available before day $t$ is used. The resulting matrix is stored as $\hat{\Sigma}^{LW}_t$, and its diagonal elements are saved for the comparison in Exercise 3c.
+
+```{python}
+# Daily close-to-close returns for all 30 stocks
+
+# Use the last intraday price for each stock on each trading day
+daily_close = (
+    hf_prices
+    .sort_values(["symbol", "trading_day", "ts"])
+    .groupby(["trading_day", "symbol"], as_index=False)
+    .last()
+)
+
+# Wide price matrix: rows = trading days, columns = stocks
+daily_prices_wide = (
+    daily_close
+    .pivot(index="trading_day", columns="symbol", values="price")
+    .sort_index()
+)
+
+# Keep the same stock order as in Exercise 2
+daily_prices_wide = daily_prices_wide[symbols]
+
+# Daily close-to-close log returns
+daily_returns = (
+    np.log(daily_prices_wide)
+    .diff()
+    .dropna(how="any")
+)
+```
+
+```{python}
+# 3b. Ledoit-Wolf shrinkage estimator
+
+W = 252
+
+lw_covariances = {}
+lw_variance_data = []
+
+daily_return_days = list(daily_returns.index)
+
+for trading_day in evaluation_days:
+    
+    if trading_day not in daily_return_days:
+        continue
+    
+    pos = daily_return_days.index(trading_day)
+    
+    if pos < W:
+        continue
+    
+    # Rolling window ending on day t - 1
+    window_returns = daily_returns.iloc[pos - W:pos]
+    
+    lw_model = LedoitWolf()
+    lw_model.fit(window_returns.values)
+    
+    sigma_lw = pd.DataFrame(
+        lw_model.covariance_,
+        index=symbols,
+        columns=symbols
+    )
+    
+    lw_covariances[trading_day] = sigma_lw
+    
+    for symbol in symbols:
+        lw_variance_data.append({
+            "trading_day": trading_day,
+            "symbol": symbol,
+            "lw_variance": sigma_lw.loc[symbol, symbol]
+        })
+
+lw_variances = pd.DataFrame(lw_variance_data)
+lw_variances["trading_day"] = pd.to_datetime(lw_variances["trading_day"])
+```
+
+### Exercise 3c: Comparing realized and Ledoit-Wolf variances
+
+To compare the smoothing properties of the two estimators, we focus on the diagonal elements of the covariance matrices. The diagonal elements of $\hat{\Sigma}^{LW}_t$ are the Ledoit-Wolf implied variance forecasts, while the diagonal elements of $RC_t$ are the realized variances computed from intraday returns in Exercise 2b.
+
+Thus, for each stock $i$, we compare
+
+$$
+\hat{\Sigma}^{LW}_{t,ii}
+\quad \text{and} \quad
+RC_{t,ii}.
+$$
+
+The Ledoit-Wolf estimator is based on a rolling window of daily close-to-close returns and shrinkage, while $RC_t$ is based on high-frequency intraday returns. The comparison therefore illustrates how much smoothing is introduced by the Ledoit-Wolf estimator relative to the more volatile realized variance series.
+
+```{python}
+# 3c. Merge LW-implied variances and realized variances
+
+rv_realized = (
+    rv_long
+    .copy()
+    .rename(columns={"realized_variance": "rc_realized_variance"})
+)
+
+rv_realized["trading_day"] = pd.to_datetime(rv_realized["trading_day"])
+
+variance_comparison = (
+    lw_variances
+    .merge(
+        rv_realized,
+        on=["trading_day", "symbol"],
+        how="inner"
+    )
+)
+```
+
+```{python}
+#| label: fig-lw-vs-realized-variance
+#| fig-cap: "Ledoit-Wolf implied variances and realized variances for the 30 DJIA stocks. The Ledoit-Wolf estimates are based on a 252-day rolling window of daily close-to-close returns, while realized variances are the diagonal elements of the daily realized covariance matrices."
+#| fig-align: center
+#| fig-pos: "H"
+#| fig-width: 12
+#| fig-height: 10
+
+variance_comparison_plot = (
+    variance_comparison
+    .sort_values(["symbol", "trading_day"])
+    .copy()
+)
+
+n_stocks = len(symbols)
+n_cols = 5
+n_rows = math.ceil(n_stocks / n_cols)
+
+fig, axes = plt.subplots(
+    n_rows,
+    n_cols,
+    figsize=(12, 10),
+    sharex=True,
+    sharey=False
+)
+
+axes = axes.flatten()
+
+for i, symbol in enumerate(symbols):
+    
+    ax = axes[i]
+    
+    stock_data = variance_comparison_plot[
+        variance_comparison_plot["symbol"] == symbol
+    ]
+    
+    ax.plot(
+        stock_data["trading_day"],
+        stock_data["rc_realized_variance"],
+        linewidth=0.7,
+        alpha=0.75,
+        label="Realized"
+    )
+    
+    ax.plot(
+        stock_data["trading_day"],
+        stock_data["lw_variance"],
+        linewidth=0.9,
+        alpha=0.9,
+        label="Ledoit-Wolf"
+    )
+    
+    ax.set_title(symbol, fontsize=8)
+    ax.tick_params(axis="x", labelrotation=45, labelsize=6)
+    ax.tick_params(axis="y", labelsize=6)
+    ax.grid(True, alpha=0.3)
+
+for j in range(n_stocks, len(axes)):
+    fig.delaxes(axes[j])
+
+handles, labels = axes[0].get_legend_handles_labels()
+
+fig.suptitle(
+    "Ledoit-Wolf implied variances vs. realized variances",
+    fontsize=12,
+    y=0.98
+)
+
+fig.legend(
+    handles,
+    labels,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 0.955),
+    ncol=2,
+    fontsize=8,
+    frameon=False
+)
+
+fig.tight_layout(rect=[0, 0, 1, 0.92])
+
+plt.show()
+```
+The figure shows that the realized variances are substantially more volatile than the Ledoit-Wolf implied variances. The realized variance series contain sharp daily spikes, especially during periods of market stress, because they are computed directly from intraday returns and therefore react immediately to short-run volatility shocks. In contrast, the Ledoit-Wolf estimates are much smoother and move more gradually over time. This reflects that the estimator is based on a 252-day rolling window of daily close-to-close returns and applies shrinkage to reduce estimation error. As argued by Ledoit and Wolf (2003, 2004), shrinkage pulls noisy and extreme covariance estimates towards a more stable target. The comparison therefore highlights the different smoothing properties of the two estimators: the realized variance estimator exhibits little smoothing and responds immediately to new information, whereas the Ledoit-Wolf estimator provides a smoother and more stable estimate of risk, but reacts more slowly to sudden changes in volatility.
+
+
+### Exercise 4: Minimum-variance portfolios
+
+Using the covariance matrix forecasts constructed in Exercise 3, we form daily minimum-variance portfolios for the evaluation period. Specifically, we compute portfolio weights based on both the high-frequency random-walk estimator, $\hat{\Sigma}^{HF}_t$, and the Ledoit-Wolf shrinkage estimator, $\hat{\Sigma}^{LW}_t$.
+
+For a given covariance matrix estimate $\hat{\Sigma}_t$, the minimum-variance portfolio is obtained by solving
+
+$$
+\omega_{mvp,t}
+=
+\arg\min_{\omega_t}
+\;
+\omega_t'
+\hat{\Sigma}_t
+\omega_t
+\quad
+\text{s.t.}
+\quad
+\iota'\omega_t = 1.
+$$
+
+Solving the first-order conditions yields the closed-form solution
+
+$$
+\omega_{mvp,t}
+=
+\frac{\hat{\Sigma}_t^{-1}\iota}
+{\iota'\hat{\Sigma}_t^{-1}\iota},
+$$
+
+where $\iota$ denotes a vector of ones.
+
+The resulting portfolio weights reflect how the different covariance estimators translate into portfolio allocations. Since the high-frequency estimator is based on the most recent realized covariance matrix, it is expected to react more strongly to short-run fluctuations in covariance. In contrast, the Ledoit-Wolf estimator uses a rolling window of daily returns and shrinkage, which may lead to more stable covariance estimates and therefore more stable portfolio weights. We compare the resulting portfolio allocations, identify the most extreme positions, and evaluate the average turnover between rebalancing dates.
+
+
+```{python}
+# ------------------------------------------------------------
+# Exercise 4: Minimum-variance portfolio weights
+# ------------------------------------------------------------
+
+def minimum_variance_weights(cov_matrix):
+    """
+    Compute unconstrained minimum-variance portfolio weights.
+
+    The portfolio solves:
+        min w' Sigma w
+        subject to iota'w = 1
+
+    Closed-form solution:
+        w = Sigma^{-1} iota / (iota' Sigma^{-1} iota)
+    """
+    
+    sigma = np.asarray(cov_matrix, dtype=float)
+    iota = np.ones(sigma.shape[0])
+    
+    # Symmetrize to avoid tiny numerical asymmetries
+    sigma = 0.5 * (sigma + sigma.T)
+    
+    try:
+        sigma_inv_iota = np.linalg.solve(sigma, iota)
+    except np.linalg.LinAlgError:
+        # Fallback if the covariance matrix is singular or ill-conditioned
+        sigma_inv_iota = np.linalg.pinv(sigma) @ iota
+    
+    weights = sigma_inv_iota / (iota @ sigma_inv_iota)
+    
+    return weights
+```
+
+```{python}
+# ------------------------------------------------------------
+# Compute minimum-variance weights for both covariance estimators
+# ------------------------------------------------------------
+
+# Use only days where both covariance estimators are available
+common_weight_days = sorted(
+    set(hf_covariances.keys()).intersection(set(lw_covariances.keys()))
+)
+
+weight_data = []
+
+for trading_day in common_weight_days:
+    
+    # High-frequency random-walk covariance estimator
+    sigma_hf = hf_covariances[trading_day].loc[symbols, symbols]
+    weights_hf = minimum_variance_weights(sigma_hf)
+    
+    # Ledoit-Wolf covariance estimator
+    sigma_lw = lw_covariances[trading_day].loc[symbols, symbols]
+    weights_lw = minimum_variance_weights(sigma_lw)
+    
+    for symbol, weight in zip(symbols, weights_hf):
+        weight_data.append({
+            "trading_day": trading_day,
+            "symbol": symbol,
+            "strategy": "HF",
+            "weight": weight
+        })
+        
+    for symbol, weight in zip(symbols, weights_lw):
+        weight_data.append({
+            "trading_day": trading_day,
+            "symbol": symbol,
+            "strategy": "LW",
+            "weight": weight
+        })
+
+weights_long = pd.DataFrame(weight_data)
+weights_long["trading_day"] = pd.to_datetime(weights_long["trading_day"])
+```
+
+```{python}
+# ------------------------------------------------------------
+# Sanity check: portfolio weights should sum to one
+# ------------------------------------------------------------
+
+weight_sums = (
+    weights_long
+    .groupby(["strategy", "trading_day"])["weight"]
+    .sum()
+    .reset_index()
+)
+
+max_weight_sum_error = np.max(
+    np.abs(weight_sums["weight"] - 1)
+)
+```
+
+```{python}
+# ------------------------------------------------------------
+# Convert weights to wide format for plotting and turnover
+# ------------------------------------------------------------
+
+weights_wide = (
+    weights_long
+    .pivot_table(
+        index=["strategy", "trading_day"],
+        columns="symbol",
+        values="weight"
+    )
+    .sort_index()
+)
+```
+
+```{python}
+#| label: fig-min-var-weights
+#| fig-cap: "Minimum-variance portfolio weights for the high-frequency and Ledoit-Wolf covariance estimators. Rows are stocks, columns are rebalancing dates. Red indicates long positions, blue indicates short positions, and white indicates weights close to zero. Both panels share the same colour scale, capped at the 99th percentile of absolute weights so that typical variation is visible."
+#| fig-align: center
+#| fig-pos: "H"
+#| fig-width: 12
+#| fig-height: 8
+
+# ------------------------------------------------------------
+# Visualise minimum-variance weights
+# ------------------------------------------------------------
+
+fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+all_abs = weights_wide[symbols].abs().to_numpy().ravel()
+vmax = np.nanpercentile(all_abs, 99)
+vmin = -vmax
+
+for ax, strategy in zip(axes, ["HF", "LW"]):
+    
+    strategy_weights = weights_wide.loc[strategy].sort_index()
+    weight_matrix = strategy_weights[symbols].T
+
+    im = ax.imshow(
+        weight_matrix,
+        aspect="auto",
+        cmap="RdBu_r",
+        vmin=vmin,
+        vmax=vmax
+    )
+
+    ax.set_title(f"{strategy} minimum-variance weights")
+    ax.set_yticks(np.arange(len(symbols)))
+    ax.set_yticklabels(symbols, fontsize=7)
+    ax.set_ylabel("Stock")
+
+    n_dates = weight_matrix.shape[1]
+    tick_positions = np.linspace(0, n_dates - 1, 6).astype(int)
+    tick_labels = [
+        strategy_weights.index[pos].strftime("%Y")
+        for pos in tick_positions
+    ]
+    
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels(tick_labels, rotation=0)
+
+fig.colorbar(im, ax=axes, label="Portfolio weight", shrink=0.8)
+
+axes[-1].set_xlabel("Trading day")
+
+plt.show()
+```
+
+```{python}
+# ------------------------------------------------------------
+# Most extreme portfolio positions
+# ------------------------------------------------------------
+
+extreme_positions = (
+    weights_long
+    .assign(
+        abs_weight=lambda x: x["weight"].abs(),
+        weight_percent=lambda x: 100 * x["weight"]
+    )
+    .sort_values("abs_weight", ascending=False)
+    .head(10)
+    .copy()
+)
+```
+```{python}
+# ------------------------------------------------------------
+# Table: most extreme positions
+# ------------------------------------------------------------
+
+extreme_positions_table = (
+    extreme_positions
+    [
+        [
+            "trading_day",
+            "strategy",
+            "symbol",
+            "weight_percent",
+            "abs_weight"
+        ]
+    ]
+    .reset_index(drop=True)       # Fjerner de gamle indeksnumre
+    .rename(columns={
+        "trading_day": "Trading day",
+        "strategy": "Strategy",
+        "symbol": "Stock",
+        "weight_percent": "Weight (%)",
+        "abs_weight": "Absolute weight"
+    })
+)
+
+extreme_positions_table.round({
+    "Weight (%)": 2,
+    "Absolute weight": 4
+})
+```
+
+```{python}
+# ------------------------------------------------------------
+# Average turnover between rebalances
+# ------------------------------------------------------------
+
+turnover_data = []
+
+for strategy in ["HF", "LW"]:
+    
+    strategy_weights = (
+        weights_wide
+        .loc[strategy]
+        .sort_index()
+    )
+    
+    turnover_series = (
+        strategy_weights
+        .diff()
+        .abs()
+        .sum(axis=1)
+        .dropna()
+    )
+    
+    turnover_data.append({
+        "strategy": strategy,
+        "average_turnover": turnover_series.mean(),
+        "median_turnover": turnover_series.median(),
+        "max_turnover": turnover_series.max(),
+        "n_rebalances": turnover_series.shape[0]
+    })
+
+turnover_summary = pd.DataFrame(turnover_data)
+
+turnover_summary["average_turnover_percent"] = (
+    100 * turnover_summary["average_turnover"]
+)
+
+turnover_summary["median_turnover_percent"] = (
+    100 * turnover_summary["median_turnover"]
+)
+
+turnover_summary["max_turnover_percent"] = (
+    100 * turnover_summary["max_turnover"]
+)
+```
+
+```{python}
+# ------------------------------------------------------------
+# Table: average turnover
+# ------------------------------------------------------------
+
+turnover_table = (
+    turnover_summary[
+        [
+            "strategy",
+            "average_turnover_percent",
+            "median_turnover_percent",
+            "max_turnover_percent",
+            "n_rebalances"
+        ]
+    ]
+    .copy()
+    .rename(columns={
+        "strategy": "Strategy",
+        "average_turnover_percent": "Average turnover (%)",
+        "median_turnover_percent": "Median turnover (%)",
+        "max_turnover_percent": "Max turnover (%)",
+        "n_rebalances": "Rebalances"
+    })
+)
+
+turnover_table.round({
+    "Average turnover (%)": 2,
+    "Median turnover (%)": 2,
+    "Max turnover (%)": 2
+})
+```
+
+```{python}
+# ------------------------------------------------------------
+# Dynamic values for text interpretation
+# ------------------------------------------------------------
+
+turnover_lookup = turnover_summary.set_index("strategy")
+
+hf_avg_turnover = turnover_lookup.loc["HF", "average_turnover_percent"]
+lw_avg_turnover = turnover_lookup.loc["LW", "average_turnover_percent"]
+
+hf_median_turnover = turnover_lookup.loc["HF", "median_turnover_percent"]
+lw_median_turnover = turnover_lookup.loc["LW", "median_turnover_percent"]
+
+top_extreme_position = extreme_positions.iloc[0]
+
+top_extreme_strategy = top_extreme_position["strategy"]
+top_extreme_stock = top_extreme_position["symbol"]
+top_extreme_weight = 100 * top_extreme_position["weight"]
+top_extreme_abs_weight = abs(top_extreme_weight)
+top_extreme_day = pd.to_datetime(
+    top_extreme_position["trading_day"]
+).strftime("%Y-%m-%d")
+```
+
+
+```{python}
+weights_long["weight"].describe()
+````
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
