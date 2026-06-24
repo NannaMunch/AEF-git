@@ -1,0 +1,348 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "95282728",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "title: Exam 2026, Part 2\n",
+    "author: Exam number 45, 46 & 47\n",
+    "date: 2026-26-06\n",
+    "date-format: MMMM DD, YYYY\n",
+    "execute: \n",
+    "  echo: false\n",
+    "  warning: false\n",
+    "format:\n",
+    "  pdf: \n",
+    "    titlepage: true\n",
+    "    number-sections: false\n",
+    "    colorlinks: true\n",
+    "    geometry:\n",
+    "      - top=20mm\n",
+    "      - left=20mm\n",
+    "      - bottom=20mm\n",
+    "      - right=20mm\n",
+    "    bibliography: references.bib\n",
+    "    cite-method: natbib\n",
+    "    biblio-style: apalike  \n",
+    "    lang: en\n",
+    "    fontsize: 12pt\n",
+    "    highlight-style: github-light\n",
+    "---"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "8d214263",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# standard library\n",
+    "from pathlib import Path\n",
+    "import itertools\n",
+    "\n",
+    "# data handling and model storage\n",
+    "import joblib\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import tidyfinance as tf\n",
+    "\n",
+    "# plotting\n",
+    "from plotnine import *\n",
+    "from mizani.formatters import percent_format\n",
+    "from IPython.display import Markdown\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "# statistical models\n",
+    "import statsmodels.api as sm\n",
+    "\n",
+    "# machine learning\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.linear_model import ElasticNet\n",
+    "from sklearn.ensemble import RandomForestRegressor\n",
+    "from sklearn.metrics import root_mean_squared_error"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "5ebdc4d7",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "hf_prices = pd.read_parquet(\"/Users/AstridMoeller/AEF/data/hf_minute_prices.parquet\")\n",
+    "\n",
+    "hf_prices[\"ts\"] = pd.to_datetime(hf_prices[\"ts\"])\n",
+    "hf_prices[\"trading_day\"] = hf_prices[\"ts\"].dt.date"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "39082ce1",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "4444\n"
+     ]
+    }
+   ],
+   "source": [
+    "aapl_raw = (\n",
+    "    hf_prices\n",
+    "    .query(\"symbol == 'AAPL'\")\n",
+    "    .copy()\n",
+    ")\n",
+    "\n",
+    "n_trading_days_aapl = aapl_raw[\"trading_day\"].nunique()\n",
+    "print(n_trading_days_aapl)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "eb0a4193",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "aapl_raw = (\n",
+    "    aapl_raw\n",
+    "    .sort_values([\"trading_day\", \"ts\"])\n",
+    "    .copy()\n",
+    ")\n",
+    "\n",
+    "aapl_raw[\"log_price\"] = np.log(aapl_raw[\"price\"])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "a38e12bb",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "       expected_minutes  observed_minutes  missing_minutes  missing_share\n",
+      "count       4444.000000       4444.000000      4444.000000    4444.000000\n",
+      "mean         388.501350        388.440369         0.060981       0.000156\n",
+      "std           16.357605         16.567129         2.661082       0.006823\n",
+      "min          210.000000        210.000000         0.000000       0.000000\n",
+      "25%          390.000000        390.000000         0.000000       0.000000\n",
+      "50%          390.000000        390.000000         0.000000       0.000000\n",
+      "75%          390.000000        390.000000         0.000000       0.000000\n",
+      "max          390.000000        390.000000       174.000000       0.446154\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/var/folders/4h/vr5_hhfs4p56g12szwg17pmr0000gn/T/ipykernel_4843/2380246388.py:22: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.\n"
+     ]
+    }
+   ],
+   "source": [
+    "def missing_minutes_one_day(group):\n",
+    "    full_grid = pd.date_range(\n",
+    "        start=group[\"ts\"].min(),\n",
+    "        end=group[\"ts\"].max(),\n",
+    "        freq=\"1min\"\n",
+    "    )\n",
+    "\n",
+    "    observed_minutes = group[\"ts\"].drop_duplicates()\n",
+    "\n",
+    "    return pd.Series({\n",
+    "        \"expected_minutes\": len(full_grid),\n",
+    "        \"observed_minutes\": observed_minutes.nunique(),\n",
+    "        \"missing_minutes\": len(full_grid) - observed_minutes.nunique(),\n",
+    "        \"missing_share\": (\n",
+    "            len(full_grid) - observed_minutes.nunique()\n",
+    "        ) / len(full_grid)\n",
+    "    })\n",
+    "\n",
+    "aapl_missing_by_day = (\n",
+    "    aapl_raw\n",
+    "    .groupby(\"trading_day\")\n",
+    "    .apply(missing_minutes_one_day)\n",
+    "    .reset_index()\n",
+    ")\n",
+    "\n",
+    "print(aapl_missing_by_day.describe())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "afad2001",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/var/folders/4h/vr5_hhfs4p56g12szwg17pmr0000gn/T/ipykernel_4843/2013592787.py:23: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.\n"
+     ]
+    }
+   ],
+   "source": [
+    "def complete_one_day(group):\n",
+    "    group = group.sort_values(\"ts\").copy()\n",
+    "\n",
+    "    full_index = pd.date_range(\n",
+    "        start=group[\"ts\"].min(),\n",
+    "        end=group[\"ts\"].max(),\n",
+    "        freq=\"1min\"\n",
+    "    )\n",
+    "\n",
+    "    group = group.set_index(\"ts\").reindex(full_index)\n",
+    "    group.index.name = \"ts\"\n",
+    "\n",
+    "    group[\"symbol\"] = \"AAPL\"\n",
+    "    group[\"trading_day\"] = group.index.date\n",
+    "    group[\"price\"] = group[\"price\"].ffill()\n",
+    "    group[\"log_price\"] = np.log(group[\"price\"])\n",
+    "\n",
+    "    return group.reset_index()\n",
+    "\n",
+    "aapl_minute = (\n",
+    "    aapl_raw\n",
+    "    .groupby(\"trading_day\", group_keys=False)\n",
+    "    .apply(complete_one_day)\n",
+    "    .dropna(subset=[\"price\"])\n",
+    "    .sort_values([\"trading_day\", \"ts\"])\n",
+    "    .reset_index(drop=True)\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "6da7af03",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def compute_daily_rv(data, sampling_minutes):\n",
+    "    sampled = data.sort_values([\"trading_day\", \"ts\"]).copy()\n",
+    "\n",
+    "    sampled[\"obs_number\"] = sampled.groupby(\"trading_day\").cumcount()\n",
+    "\n",
+    "    sampled = sampled[\n",
+    "        sampled[\"obs_number\"] % sampling_minutes == 0\n",
+    "    ].copy()\n",
+    "\n",
+    "    sampled[\"intraday_return\"] = (\n",
+    "        sampled\n",
+    "        .groupby(\"trading_day\")[\"log_price\"]\n",
+    "        .diff()\n",
+    "    )\n",
+    "\n",
+    "    rv_daily = (\n",
+    "        sampled\n",
+    "        .groupby(\"trading_day\")\n",
+    "        .agg(\n",
+    "            realized_variance=(\n",
+    "                \"intraday_return\",\n",
+    "                lambda x: np.nansum(x ** 2)\n",
+    "            ),\n",
+    "            n_returns=(\n",
+    "                \"intraday_return\",\n",
+    "                lambda x: x.notna().sum()\n",
+    "            )\n",
+    "        )\n",
+    "        .reset_index()\n",
+    "    )\n",
+    "\n",
+    "    rv_daily[\"sampling_minutes\"] = sampling_minutes\n",
+    "\n",
+    "    return rv_daily"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "24896505",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "sampling_intervals = [1, 2, 5, 10, 15, 30, 60]\n",
+    "\n",
+    "rv_all = pd.concat(\n",
+    "    [\n",
+    "        compute_daily_rv(aapl_minute, interval)\n",
+    "        for interval in sampling_intervals\n",
+    "    ],\n",
+    "    ignore_index=True\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "87637b20",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "   sampling_minutes   mean_rv     sd_rv  n_days     se_rv  ci_lower  ci_upper\n",
+      "0                 1  0.000298  0.000626    4444  0.000009  0.000279  0.000316\n",
+      "1                 2  0.000269  0.000657    4444  0.000010  0.000249  0.000288\n",
+      "2                 5  0.000245  0.000625    4444  0.000009  0.000227  0.000264\n",
+      "3                10  0.000226  0.000463    4444  0.000007  0.000212  0.000239\n",
+      "4                15  0.000222  0.000655    4444  0.000010  0.000203  0.000241\n",
+      "5                30  0.000201  0.000423    4444  0.000006  0.000189  0.000214\n",
+      "6                60  0.000198  0.000458    4444  0.000007  0.000185  0.000212\n"
+     ]
+    }
+   ],
+   "source": [
+    "rv_summary = (\n",
+    "    rv_all\n",
+    "    .groupby(\"sampling_minutes\")\n",
+    "    .agg(\n",
+    "        mean_rv=(\"realized_variance\", \"mean\"),\n",
+    "        sd_rv=(\"realized_variance\", \"std\"),\n",
+    "        n_days=(\"realized_variance\", \"count\")\n",
+    "    )\n",
+    "    .reset_index()\n",
+    ")\n",
+    "\n",
+    "rv_summary[\"se_rv\"] = rv_summary[\"sd_rv\"] / np.sqrt(rv_summary[\"n_days\"])\n",
+    "rv_summary[\"ci_lower\"] = rv_summary[\"mean_rv\"] - 1.96 * rv_summary[\"se_rv\"]\n",
+    "rv_summary[\"ci_upper\"] = rv_summary[\"mean_rv\"] + 1.96 * rv_summary[\"se_rv\"]\n",
+    "\n",
+    "print(rv_summary)"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3",
+   "path": "/Users/AstridMoeller/Documents/GitHub/AEF-git/.venv/share/jupyter/kernels/python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.15"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

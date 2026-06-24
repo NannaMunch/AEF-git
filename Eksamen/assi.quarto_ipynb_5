@@ -1,0 +1,542 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "bb220b7f",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "title: Exam 2026, Part 2\n",
+    "author: Exam number 45, 46 & 47\n",
+    "date: 2026-26-06\n",
+    "date-format: MMMM DD, YYYY\n",
+    "execute: \n",
+    "  echo: false\n",
+    "  warning: false\n",
+    "format:\n",
+    "  pdf: \n",
+    "    titlepage: true\n",
+    "    number-sections: false\n",
+    "    colorlinks: true\n",
+    "    geometry:\n",
+    "      - top=20mm\n",
+    "      - left=20mm\n",
+    "      - bottom=20mm\n",
+    "      - right=20mm\n",
+    "    bibliography: references.bib\n",
+    "    cite-method: natbib\n",
+    "    biblio-style: apalike  \n",
+    "    lang: en\n",
+    "    fontsize: 12pt\n",
+    "    highlight-style: github-light\n",
+    "---"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "e6a7378b",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# standard library\n",
+    "from pathlib import Path\n",
+    "import itertools\n",
+    "\n",
+    "# data handling and model storage\n",
+    "import joblib\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import tidyfinance as tf\n",
+    "\n",
+    "# plotting\n",
+    "from plotnine import *\n",
+    "from mizani.formatters import percent_format\n",
+    "from IPython.display import Markdown\n",
+    "import matplotlib.pyplot as plt\n",
+    "\n",
+    "# statistical models\n",
+    "import statsmodels.api as sm\n",
+    "\n",
+    "# machine learning\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.linear_model import ElasticNet\n",
+    "from sklearn.ensemble import RandomForestRegressor\n",
+    "from sklearn.metrics import root_mean_squared_error"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "c3751b7b",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "  symbol                        ts  price\n",
+      "0   AAPL 2008-03-20 09:30:00+00:00   3.88\n",
+      "1   AAPL 2008-03-20 09:31:00+00:00   3.88\n",
+      "2   AAPL 2008-03-20 09:32:00+00:00   3.89\n",
+      "3   AAPL 2008-03-20 09:33:00+00:00   3.88\n",
+      "4   AAPL 2008-03-20 09:34:00+00:00   3.88\n",
+      "symbol                 object\n",
+      "ts        datetime64[us, UTC]\n",
+      "price                 float64\n",
+      "dtype: object\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "30\n"
+     ]
+    }
+   ],
+   "source": [
+    "# -------------------------------------------------\n",
+    "# 1. Load high-frequency minute price data\n",
+    "# -------------------------------------------------\n",
+    "\n",
+    "hf_prices = pd.read_parquet(\"/Users/AstridMoeller/AEF/data/hf_minute_prices.parquet\")\n",
+    "\n",
+    "# Inspect structure\n",
+    "print(hf_prices.head())\n",
+    "print(hf_prices.dtypes)\n",
+    "print(hf_prices[\"symbol\"].nunique())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "55c1558b",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "count    4444.000000\n",
+      "mean      388.440369\n",
+      "std        16.567129\n",
+      "min       210.000000\n",
+      "25%       390.000000\n",
+      "50%       390.000000\n",
+      "75%       390.000000\n",
+      "max       390.000000\n",
+      "Name: n_minutes, dtype: float64\n"
+     ]
+    }
+   ],
+   "source": [
+    "# --------------------------------------------------------\n",
+    "# 2. Keep AAPL only and prepare time variables\n",
+    "# --------------------------------------------------------\n",
+    "\n",
+    "aapl_raw = (\n",
+    "    hf_prices\n",
+    "    .query(\"symbol == 'AAPL'\")\n",
+    "    .copy()\n",
+    ")\n",
+    "\n",
+    "aapl_raw[\"ts\"] = pd.to_datetime(aapl_raw[\"ts\"])\n",
+    "aapl_raw[\"trading_day\"] = aapl_raw[\"ts\"].dt.date\n",
+    "aapl_raw[\"log_price\"] = np.log(aapl_raw[\"price\"])\n",
+    "\n",
+    "aapl_raw = aapl_raw.sort_values([\"trading_day\", \"ts\"])\n",
+    "\n",
+    "# Check number of observations per day\n",
+    "day_check = (\n",
+    "    aapl_raw\n",
+    "    .groupby(\"trading_day\")\n",
+    "    .size()\n",
+    "    .rename(\"n_minutes\")\n",
+    "    .reset_index()\n",
+    ")\n",
+    "\n",
+    "print(day_check[\"n_minutes\"].describe())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "07d4e6b9",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "  trading_day           first_timestamp            last_timestamp  \\\n",
+      "0  2008-03-20 2008-03-20 09:30:00+00:00 2008-03-20 15:59:00+00:00   \n",
+      "1  2008-03-24 2008-03-24 09:30:00+00:00 2008-03-24 15:59:00+00:00   \n",
+      "2  2008-03-25 2008-03-25 09:30:00+00:00 2008-03-25 15:59:00+00:00   \n",
+      "3  2008-03-26 2008-03-26 09:30:00+00:00 2008-03-26 15:59:00+00:00   \n",
+      "4  2008-03-27 2008-03-27 09:30:00+00:00 2008-03-27 15:59:00+00:00   \n",
+      "\n",
+      "   expected_minutes  observed_minutes  missing_minutes  missing_share  \n",
+      "0               390               390                0            0.0  \n",
+      "1               390               390                0            0.0  \n",
+      "2               390               390                0            0.0  \n",
+      "3               390               390                0            0.0  \n",
+      "4               390               390                0            0.0  \n",
+      "       expected_minutes  observed_minutes  missing_minutes  missing_share\n",
+      "count       4444.000000       4444.000000      4444.000000    4444.000000\n",
+      "mean         388.501350        388.440369         0.060981       0.000156\n",
+      "std           16.357605         16.567129         2.661082       0.006823\n",
+      "min          210.000000        210.000000         0.000000       0.000000\n",
+      "25%          390.000000        390.000000         0.000000       0.000000\n",
+      "50%          390.000000        390.000000         0.000000       0.000000\n",
+      "75%          390.000000        390.000000         0.000000       0.000000\n",
+      "max          390.000000        390.000000       174.000000       0.446154\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/var/folders/4h/vr5_hhfs4p56g12szwg17pmr0000gn/T/ipykernel_4123/1730642635.py:38: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Prepare timestamps\n",
+    "hf_prices[\"ts\"] = pd.to_datetime(hf_prices[\"ts\"])\n",
+    "hf_prices[\"trading_day\"] = hf_prices[\"ts\"].dt.date\n",
+    "\n",
+    "# Keep AAPL\n",
+    "aapl_raw = (\n",
+    "    hf_prices\n",
+    "    .query(\"symbol == 'AAPL'\")\n",
+    "    .sort_values([\"trading_day\", \"ts\"])\n",
+    "    .copy()\n",
+    ")\n",
+    "\n",
+    "def missing_minutes_one_day(group):\n",
+    "    \"\"\"\n",
+    "    Counts how many minute timestamps are missing within one trading day.\n",
+    "    Expected minutes are defined from the first to the last observed timestamp that day.\n",
+    "    \"\"\"\n",
+    "    full_grid = pd.date_range(\n",
+    "        start=group[\"ts\"].min(),\n",
+    "        end=group[\"ts\"].max(),\n",
+    "        freq=\"1min\"\n",
+    "    )\n",
+    "    \n",
+    "    observed_minutes = group[\"ts\"].drop_duplicates()\n",
+    "    \n",
+    "    return pd.Series({\n",
+    "        \"first_timestamp\": group[\"ts\"].min(),\n",
+    "        \"last_timestamp\": group[\"ts\"].max(),\n",
+    "        \"expected_minutes\": len(full_grid),\n",
+    "        \"observed_minutes\": observed_minutes.nunique(),\n",
+    "        \"missing_minutes\": len(full_grid) - observed_minutes.nunique(),\n",
+    "        \"missing_share\": (len(full_grid) - observed_minutes.nunique()) / len(full_grid)\n",
+    "    })\n",
+    "\n",
+    "aapl_missing_by_day = (\n",
+    "    aapl_raw\n",
+    "    .groupby(\"trading_day\")\n",
+    "    .apply(missing_minutes_one_day)\n",
+    "    .reset_index()\n",
+    ")\n",
+    "\n",
+    "print(aapl_missing_by_day.head())\n",
+    "print(aapl_missing_by_day[[\"expected_minutes\", \"observed_minutes\", \"missing_minutes\", \"missing_share\"]].describe())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "626ded7c",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/var/folders/4h/vr5_hhfs4p56g12szwg17pmr0000gn/T/ipykernel_4123/131346619.py:33: FutureWarning: DataFrameGroupBy.apply operated on the grouping columns. This behavior is deprecated, and in a future version of pandas the grouping columns will be excluded from the operation. Either pass `include_groups=False` to exclude the groupings or explicitly select the grouping columns after groupby to silence this warning.\n"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "count    4444.000000\n",
+      "mean      388.501350\n",
+      "std        16.357605\n",
+      "min       210.000000\n",
+      "25%       390.000000\n",
+      "50%       390.000000\n",
+      "75%       390.000000\n",
+      "max       390.000000\n",
+      "Name: n_minutes_after_fill, dtype: float64\n"
+     ]
+    }
+   ],
+   "source": [
+    "# ------------------------------------------------------------\n",
+    "# 3. Create a regular one-minute grid within each trading day\n",
+    "#    and forward-fill missing prices within the same day\n",
+    "# ------------------------------------------------------------\n",
+    "\n",
+    "def complete_one_day(group):\n",
+    "    \"\"\"\n",
+    "    Creates a complete one-minute grid for one trading day\n",
+    "    and forward-fills the most recent observed price.\n",
+    "    \"\"\"\n",
+    "    group = group.sort_values(\"ts\").copy()\n",
+    "    \n",
+    "    full_index = pd.date_range(\n",
+    "        start=group[\"ts\"].min(),\n",
+    "        end=group[\"ts\"].max(),\n",
+    "        freq=\"1min\"\n",
+    "    )\n",
+    "    \n",
+    "    group = group.set_index(\"ts\").reindex(full_index)\n",
+    "    group.index.name = \"ts\"\n",
+    "    \n",
+    "    group[\"symbol\"] = \"AAPL\"\n",
+    "    group[\"trading_day\"] = group.index.date\n",
+    "    group[\"price\"] = group[\"price\"].ffill()\n",
+    "    group[\"log_price\"] = np.log(group[\"price\"])\n",
+    "    \n",
+    "    return group.reset_index()\n",
+    "\n",
+    "\n",
+    "aapl_minute = (\n",
+    "    aapl_raw\n",
+    "    .groupby(\"trading_day\", group_keys=False)\n",
+    "    .apply(complete_one_day)\n",
+    "    .dropna(subset=[\"price\"])\n",
+    "    .sort_values([\"trading_day\", \"ts\"])\n",
+    "    .reset_index(drop=True)\n",
+    ")\n",
+    "\n",
+    "# Check after filling\n",
+    "minute_check = (\n",
+    "    aapl_minute\n",
+    "    .groupby(\"trading_day\")\n",
+    "    .size()\n",
+    "    .rename(\"n_minutes_after_fill\")\n",
+    "    .reset_index()\n",
+    ")\n",
+    "\n",
+    "print(minute_check[\"n_minutes_after_fill\"].describe())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "c6c0336a",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# ------------------------------------------------------------\n",
+    "# 4. Function to compute daily realized variance\n",
+    "# ------------------------------------------------------------\n",
+    "\n",
+    "def compute_daily_rv(data, sampling_minutes):\n",
+    "    \"\"\"\n",
+    "    Computes daily realized variance for a given sampling interval.\n",
+    "    \n",
+    "    Parameters\n",
+    "    ----------\n",
+    "    data : pandas DataFrame\n",
+    "        Must contain trading_day, ts, and log_price.\n",
+    "    sampling_minutes : int\n",
+    "        Sampling interval in minutes, e.g. 1, 5, 10.\n",
+    "    \n",
+    "    Returns\n",
+    "    -------\n",
+    "    pandas DataFrame\n",
+    "        Daily realized variance for each trading day.\n",
+    "    \"\"\"\n",
+    "    \n",
+    "    sampled = (\n",
+    "        data\n",
+    "        .sort_values([\"trading_day\", \"ts\"])\n",
+    "        .copy()\n",
+    "    )\n",
+    "    \n",
+    "    # Observation number within each trading day\n",
+    "    sampled[\"obs_number\"] = sampled.groupby(\"trading_day\").cumcount()\n",
+    "    \n",
+    "    # Keep every sampling_minutes-th observation\n",
+    "    sampled = sampled[\n",
+    "        sampled[\"obs_number\"] % sampling_minutes == 0\n",
+    "    ].copy()\n",
+    "    \n",
+    "    # Intraday log returns within each trading day\n",
+    "    sampled[\"intraday_return\"] = (\n",
+    "        sampled\n",
+    "        .groupby(\"trading_day\")[\"log_price\"]\n",
+    "        .diff()\n",
+    "    )\n",
+    "    \n",
+    "    # Realized variance = sum of squared intraday returns\n",
+    "    rv_daily = (\n",
+    "        sampled\n",
+    "        .groupby(\"trading_day\")\n",
+    "        .agg(\n",
+    "            realized_variance=(\"intraday_return\", lambda x: np.nansum(x ** 2)),\n",
+    "            n_returns=(\"intraday_return\", lambda x: x.notna().sum())\n",
+    "        )\n",
+    "        .reset_index()\n",
+    "    )\n",
+    "    \n",
+    "    rv_daily[\"sampling_minutes\"] = sampling_minutes\n",
+    "    \n",
+    "    return rv_daily"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "b104f681",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "  trading_day  realized_variance  n_returns  sampling_minutes\n",
+      "0  2008-03-20           0.000801        389                 1\n",
+      "1  2008-03-24           0.000928        389                 1\n",
+      "2  2008-03-25           0.000896        389                 1\n",
+      "3  2008-03-26           0.000808        389                 1\n",
+      "4  2008-03-27           0.000808        389                 1\n"
+     ]
+    }
+   ],
+   "source": [
+    "# ------------------------------------------------------------\n",
+    "# 5. Compute realized variance for all required intervals\n",
+    "# ------------------------------------------------------------\n",
+    "\n",
+    "sampling_intervals = [1, 2, 5, 10, 15, 30, 60]\n",
+    "\n",
+    "rv_all = pd.concat(\n",
+    "    [compute_daily_rv(aapl_minute, interval) for interval in sampling_intervals],\n",
+    "    ignore_index=True\n",
+    ")\n",
+    "\n",
+    "print(rv_all.head())"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "cc1d2082",
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "   sampling_minutes   mean_rv     sd_rv  n_days     se_rv  ci_lower  ci_upper\n",
+      "0                 1  0.000298  0.000626    4444  0.000009  0.000279  0.000316\n",
+      "1                 2  0.000269  0.000657    4444  0.000010  0.000249  0.000288\n",
+      "2                 5  0.000245  0.000625    4444  0.000009  0.000227  0.000264\n",
+      "3                10  0.000226  0.000463    4444  0.000007  0.000212  0.000239\n",
+      "4                15  0.000222  0.000655    4444  0.000010  0.000203  0.000241\n",
+      "5                30  0.000201  0.000423    4444  0.000006  0.000189  0.000214\n",
+      "6                60  0.000198  0.000458    4444  0.000007  0.000185  0.000212\n"
+     ]
+    }
+   ],
+   "source": [
+    "# ------------------------------------------------------------\n",
+    "# 6. Summary statistics for volatility signature plot\n",
+    "# ------------------------------------------------------------\n",
+    "\n",
+    "rv_summary = (\n",
+    "    rv_all\n",
+    "    .groupby(\"sampling_minutes\")\n",
+    "    .agg(\n",
+    "        mean_rv=(\"realized_variance\", \"mean\"),\n",
+    "        sd_rv=(\"realized_variance\", \"std\"),\n",
+    "        n_days=(\"realized_variance\", \"count\")\n",
+    "    )\n",
+    "    .reset_index()\n",
+    ")\n",
+    "\n",
+    "rv_summary[\"se_rv\"] = rv_summary[\"sd_rv\"] / np.sqrt(rv_summary[\"n_days\"])\n",
+    "rv_summary[\"ci_lower\"] = rv_summary[\"mean_rv\"] - 1.96 * rv_summary[\"se_rv\"]\n",
+    "rv_summary[\"ci_upper\"] = rv_summary[\"mean_rv\"] + 1.96 * rv_summary[\"se_rv\"]\n",
+    "\n",
+    "print(rv_summary)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "id": "22ea489e",
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "application/pdf": "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IC9Gb250TWF0cml4IFsgMC4wMDEgMCAwIDAuMDAxIDAgMCBdCi9DaGFyUHJvY3MgMTcgMCBSCi9FbmNvZGluZyA8PCAvVHlwZSAvRW5jb2RpbmcKL0RpZmZlcmVuY2VzIFsgMzIgL3NwYWNlIDQ2IC9wZXJpb2QgNDggL3plcm8gL29uZSAvdHdvIC90aHJlZSAvZm91ciAvZml2ZSAvc2l4IDU2Ci9laWdodCA2NSAvQSA3NiAvTCA4MCAvUCA4MyAvUyA4NiAvViA5NyAvYSA5OSAvYyAvZCAvZSAvZiAvZyAxMDUgL2kgMTA4IC9sCi9tIC9uIC9vIC9wIDExNCAvciAvcyAvdCAvdSAvdiAxMjEgL3kgL3ogXQo+PgovV2lkdGhzIDE0IDAgUiA+PgplbmRvYmoKMTUgMCBvYmoKPDwgL1R5cGUgL0ZvbnREZXNjcmlwdG9yIC9Gb250TmFtZSAvQk1RUURWK0RlamFWdVNhbnMgL0ZsYWdzIDMyCi9Gb250QkJveCBbIC0xMDIxIC00NjMgMTc5NCAxMjMzIF0gL0FzY2VudCA5MjkgL0Rlc2NlbnQgLTIzNiAvQ2FwSGVpZ2h0IDAKL1hIZWlnaHQgMCAvSXRhbGljQW5nbGUgMCAvU3RlbVYgMCAvTWF4V2lkdGggMTM0MiA+PgplbmRvYmoKMTQgMCBvYmoKWyA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMAo2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDYwMCA2MDAgNjAwIDMxOCA0MDEgNDYwIDgzOCA2MzYKOTUwIDc4MCAyNzUgMzkwIDM5MCA1MDAgODM4IDMxOCAzNjEgMzE4IDMzNyA2MzYgNjM2IDYzNiA2MzYgNjM2IDYzNiA2MzYgNjM2CjYzNiA2MzYgMzM3IDMzNyA4MzggODM4IDgzOCA1MzEgMTAwMCA2ODQgNjg2IDY5OCA3NzAgNjMyIDU3NSA3NzUgNzUyIDI5NQoyOTUgNjU2IDU1NyA4NjMgNzQ4IDc4NyA2MDMgNzg3IDY5NSA2MzUgNjExIDczMiA2ODQgOTg5IDY4NSA2MTEgNjg1IDM5MCAzMzcKMzkwIDgzOCA1MDAgNTAwIDYxMyA2MzUgNTUwIDYzNSA2MTUgMzUyIDYzNSA2MzQgMjc4IDI3OCA1NzkgMjc4IDk3NCA2MzQgNjEyCjYzNSA2MzUgNDExIDUyMSAzOTIgNjM0IDU5MiA4MTggNTkyIDU5MiA1MjUgNjM2IDMzNyA2MzYgODM4IDYwMCA2MzYgNjAwIDMxOAozNTIgNTE4IDEwMDAgNTAwIDUwMCA1MDAgMTM0MiA2MzUgNDAwIDEwNzAgNjAwIDY4NSA2MDAgNjAwIDMxOCAzMTggNTE4IDUxOAo1OTAgNTAwIDEwMDAgNTAwIDEwMDAgNTIxIDQwMCAxMDIzIDYwMCA1MjUgNjExIDMxOCA0MDEgNjM2IDYzNiA2MzYgNjM2IDMzNwo1MDAgNTAwIDEwMDAgNDcxIDYxMiA4MzggMzYxIDEwMDAgNTAwIDUwMCA4MzggNDAxIDQwMSA1MDAgNjM2IDYzNiAzMTggNTAwCjQwMSA0NzEgNjEyIDk2OSA5NjkgOTY5IDUzMSA2ODQgNjg0IDY4NCA2ODQgNjg0IDY4NCA5NzQgNjk4IDYzMiA2MzIgNjMyIDYzMgoyOTUgMjk1IDI5NSAyOTUgNzc1IDc0OCA3ODcgNzg3IDc4NyA3ODcgNzg3IDgzOCA3ODcgNzMyIDczMiA3MzIgNzMyIDYxMSA2MDUKNjMwIDYxMyA2MTMgNjEzIDYxMyA2MTMgNjEzIDk4MiA1NTAgNjE1IDYxNSA2MTUgNjE1IDI3OCAyNzggMjc4IDI3OCA2MTIgNjM0CjYxMiA2MTIgNjEyIDYxMiA2MTIgODM4IDYxMiA2MzQgNjM0IDYzNCA2MzQgNTkyIDYzNSA1OTIgXQplbmRvYmoKMTcgMCBvYmoKPDwgL0EgMTggMCBSIC9MIDE5IDAgUiAvUCAyMCAwIFIgL1MgMjEgMCBSIC9WIDIyIDAgUiAvYSAyMyAwIFIgL2MgMjQgMCBSCi9kIDI1IDAgUiAvZSAyNiAwIFIgL2VpZ2h0IDI3IDAgUiAvZiAyOCAwIFIgL2ZpdmUgMjkgMCBSIC9mb3VyIDMwIDAgUgovZyAzMSAwIFIgL2kgMzIgMCBSIC9sIDMzIDAgUiAvbSAzNCAwIFIgL24gMzUgMCBSIC9vIDM2IDAgUiAvb25lIDM3IDAgUgovcCAzOCAwIFIgL3BlcmlvZCAzOSAwIFIgL3IgNDAgMCBSIC9zIDQxIDAgUiAvc2l4IDQyIDAgUiAvc3BhY2UgNDMgMCBSCi90IDQ0IDAgUiAvdGhyZWUgNDUgMCBSIC90d28gNDYgMCBSIC91IDQ3IDAgUiAvdiA0OCAwIFIgL3kgNDkgMCBSIC96IDUwIDAgUgovemVybyA1MSAwIFIgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL0YxIDE2IDAgUiA+PgplbmRvYmoKNCAwIG9iago8PCAvQTEgPDwgL1R5cGUgL0V4dEdTdGF0ZSAvQ0EgMCAvY2EgMSA+PgovQTIgPDwgL1R5cGUgL0V4dEdTdGF0ZSAvQ0EgMSAvY2EgMC4yID4+Ci9BMyA8PCAvVHlwZSAvRXh0R1N0YXRlIC9DQSAwLjMgL2NhIDEgPj4KL0E0IDw8IC9UeXBlIC9FeHRHU3RhdGUgL0NBIDEgL2NhIDEgPj4gPj4KZW5kb2JqCjUgMCBvYmoKPDwgPj4KZW5kb2JqCjYgMCBvYmoKPDwgPj4KZW5kb2JqCjcgMCBvYmoKPDwgL00wIDEzIDAgUiA+PgplbmRvYmoKMTMgMCBvYmoKPDwgL1R5cGUgL1hPYmplY3QgL1N1YnR5cGUgL0Zvcm0gL0JCb3ggWyAtOCAtOCA4IDggXSAvTGVuZ3RoIDEzMQovRmlsdGVyIC9GbGF0ZURlY29kZSA+PgpzdHJlYW0KeJxtkEEOhCAMRfc9RS/wSUtFZevSa7iZTOL9twNxQEzdNNC+PH5R/pLwTqXA+CQJS06z5HrTkNK6TIwY5tWyKMegUS3WznU4qM/QcGN0i7EUptTW6Hijm+k23pM/+rBZIUY/HA6vhHsWQyZcKTEGh98LL9vD/xGeXtTAH6KNfmNaQ/0KZW5kc3RyZWFtCmVuZG9iagoyIDAgb2JqCjw8IC9UeXBlIC9QYWdlcyAvS2lkcyBbIDExIDAgUiBdIC9Db3VudCAxID4+CmVuZG9iago1MiAwIG9iago8PCAvQ3JlYXRvciAoTWF0cGxvdGxpYiB2My4xMC44LCBodHRwczovL21hdHBsb3RsaWIub3JnKQovUHJvZHVjZXIgKE1hdHBsb3RsaWIgcGRmIGJhY2tlbmQgdjMuMTAuOCkKL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MDYyNDEwMzQwOSswMicwMCcpID4+CmVuZG9iagp4cmVmCjAgNTMKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE2IDAwMDAwIG4gCjAwMDAwMTMzMDcgMDAwMDAgbiAKMDAwMDAxMjc2NiAwMDAwMCBuIAowMDAwMDEyNzk4IDAwMDAwIG4gCjAwMDAwMTI5NzkgMDAwMDAgbiAKMDAwMDAxMzAwMCAwMDAwMCBuIAowMDAwMDEzMDIxIDAwMDAwIG4gCjAwMDAwMDAwNjUgMDAwMDAgbiAKMDAwMDAwMDM0MyAwMDAwMCBuIAowMDAwMDAxNzk0IDAwMDAwIG4gCjAwMDAwMDAyMDggMDAwMDAgbiAKMDAwMDAwMTc3MyAwMDAwMCBuIAowMDAwMDEzMDUzIDAwMDAwIG4gCjAwMDAwMTEzMTkgMDAwMDAgbiAKMDAwMDAxMTExMiAwMDAwMCBuIAowMDAwMDEwNjIyIDAwMDAwIG4gCjAwMDAwMTIzNzIgMDAwMDAgbiAKMDAwMDAwMTgxNCAwMDAwMCBuIAowMDAwMDAxOTc3IDAwMDAwIG4gCjAwMDAwMDIxMTAgMDAwMDAgbiAKMDAwMDAwMjM1MyAwMDAwMCBuIAowMDAwMDAyNzY3IDAwMDAwIG4gCjAwMDAwMDI5MTEgMDAwMDAgbiAKMDAwMDAwMzI5MSAwMDAwMCBuIAowMDAwMDAzNTk2IDAwMDAwIG4gCjAwMDAwMDM5MDAgMDAwMDAgbiAKMDAwMDAwNDIyMiAwMDAwMCBuIAowMDAwMDA0NjkwIDAwMDAwIG4gCjAwMDAwMDQ4OTkgMDAwMDAgbiAKMDAwMDAwNTIyMSAwMDAwMCBuIAowMDAwMDA1Mzg3IDAwMDAwIG4gCjAwMDAwMDU4MDEgMDAwMDAgbiAKMDAwMDAwNTk0NSAwMDAwMCBuIAowMDAwMDA2MDY0IDAwMDAwIG4gCjAwMDAwMDYzOTUgMDAwMDAgbiAKMDAwMDAwNjYzMSAwMDAwMCBuIAowMDAwMDA2OTIyIDAwMDAwIG4gCjAwMDAwMDcwNzcgMDAwMDAgbiAKMDAwMDAwNzM4OSAwMDAwMCBuIAowMDAwMDA3NTEyIDAwMDAwIG4gCjAwMDAwMDc3NDUgMDAwMDAgbiAKMDAwMDAwODE1MiAwMDAwMCBuIAowMDAwMDA4NTQ1IDAwMDAwIG4gCjAwMDAwMDg2MzUgMDAwMDAgbiAKMDAwMDAwODg0MSAwMDAwMCBuIAowMDAwMDA5MjU0IDAwMDAwIG4gCjAwMDAwMDk1NzggMDAwMDAgbiAKMDAwMDAwOTgyNSAwMDAwMCBuIAowMDAwMDA5OTcyIDAwMDAwIG4gCjAwMDAwMTAxODYgMDAwMDAgbiAKMDAwMDAxMDMzNCAwMDAwMCBuIAowMDAwMDEzMzY3IDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNTMgL1Jvb3QgMSAwIFIgL0luZm8gNTIgMCBSID4+CnN0YXJ0eHJlZgoxMzUyNgolJUVPRgo=",
+      "text/plain": [
+       "<Figure size 2400x1500 with 1 Axes>"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "# ------------------------------------------------------------\n",
+    "# 7. Volatility signature plot\n",
+    "# ------------------------------------------------------------\n",
+    "\n",
+    "plt.figure(figsize=(8, 5))\n",
+    "\n",
+    "plt.plot(\n",
+    "    rv_summary[\"sampling_minutes\"],\n",
+    "    rv_summary[\"mean_rv\"],\n",
+    "    marker=\"o\"\n",
+    ")\n",
+    "\n",
+    "plt.fill_between(\n",
+    "    rv_summary[\"sampling_minutes\"],\n",
+    "    rv_summary[\"ci_lower\"],\n",
+    "    rv_summary[\"ci_upper\"],\n",
+    "    alpha=0.2\n",
+    ")\n",
+    "\n",
+    "plt.xlabel(\"Sampling interval in minutes\")\n",
+    "plt.ylabel(\"Average daily realized variance\")\n",
+    "plt.title(\"Volatility signature plot for AAPL\")\n",
+    "plt.xticks(sampling_intervals)\n",
+    "plt.grid(True, alpha=0.3)\n",
+    "\n",
+    "plt.show()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3",
+   "path": "/Users/AstridMoeller/Documents/GitHub/AEF-git/.venv/share/jupyter/kernels/python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.15"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

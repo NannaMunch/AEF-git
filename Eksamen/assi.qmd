@@ -1,7 +1,7 @@
 ---
 title: Exam 2026, Part 2
 author: Exam number 45, 46 & 47
-date: 2026-26-06
+date: 2026-06-26
 date-format: MMMM DD, YYYY
 execute: 
   echo: false
@@ -100,7 +100,7 @@ $$
 RV_d^{(\Delta)} = \sum_j \left(r_{d,j}^{(\Delta)}\right)^2,
 $$
 
-where $r_{d,j}^{(\Delta)}$ is the intraday log return over sampling interval.
+where \(r_{d,j}^{(\Delta)}\) is the intraday log return over sampling interval.
 
 ```{python}
 # ------------------------------------------------------------
@@ -385,4 +385,3 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 ```
-
