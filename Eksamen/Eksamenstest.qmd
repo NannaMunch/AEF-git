@@ -1,0 +1,397 @@
+---
+title: Exam 2026, Part 2
+author: Exam number 45, 46 & 47
+date: 2026-26-06
+date-format: MMMM DD, YYYY
+execute: 
+  echo: false
+  warning: false
+format:
+  pdf: 
+    titlepage: true
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - top=20mm
+      - left=20mm
+      - bottom=20mm
+      - right=20mm
+    bibliography: references.bib
+    cite-method: natbib
+    biblio-style: apalike  
+    lang: en
+    fontsize: 12pt
+    highlight-style: github-light
+---
+
+```{python}
+# standard library
+from pathlib import Path
+import itertools
+
+# data handling and model storage
+import joblib
+import numpy as np
+import pandas as pd
+import tidyfinance as tf
+
+# plotting
+from plotnine import *
+from mizani.formatters import percent_format
+from IPython.display import Markdown
+import matplotlib.pyplot as plt
+
+# statistical models
+import statsmodels.api as sm
+
+# machine learning
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import root_mean_squared_error
+```
+
+```{python}
+# ------------------------------------------------------------
+# 1. Load high-frequency minute price data
+# ------------------------------------------------------------
+
+data_path = Path("/Users/esmeraldalarsson/Desktop/hf_minute_prices.parquet")
+
+hf_prices = pd.read_parquet(data_path)
+
+# Convert timestamp column to datetime format
+hf_prices["ts"] = pd.to_datetime(hf_prices["ts"])
+
+# Extract trading day from timestamp
+hf_prices["trading_day"] = hf_prices["ts"].dt.date
+
+
+# ------------------------------------------------------------
+# Fixed trading-hours setup used
+# ------------------------------------------------------------
+
+MARKET_OPEN = "09:30:00"
+MARKET_CLOSE = "15:59:00"
+
+# Preserve the timezone of the timestamp column.
+# In the rendered output, timestamps appear as +00:00,
+# so the grid must use the same timezone.
+TS_TZ = hf_prices["ts"].dt.tz
+
+def market_timestamp(trading_day, clock_time):
+    """
+    Create a timestamp for a given trading day and clock time,
+    using the same timezone as the raw timestamp column.
+    """
+    return pd.Timestamp(f"{trading_day} {clock_time}", tz=TS_TZ)
+```
+
+## Exercise 1: Choice of realized variance estimator
+
+We first load the high-frequency minute price data and filter the dataset to AAPL. The timestamp column is converted to datetime format, and we define each trading day from the timestamp.
+
+The data contain minute-level closing prices during regular trading hours. We use a fixed one-minute calendar-time grid from 09:30 to 15:59 for each trading day. This corresponds to 390 one-minute observations per normal trading day. Since a stock may not trade in every minute, we handle missing prices using previous-tick interpolation within each trading day only. This means that if AAPL has no observed price in a given minute, we carry forward the most recently observed price from the same trading day. We do not carry prices across trading days, and we do not backfill prices before the first observed price of a day.
+
+For each sampling interval $\Delta \in \{1,2,5,10,15,30,60\}$, we sample prices on a fixed grid relative to the market open. For example, with 10-minute sampling, prices are taken at 09:30, 09:40, 09:50, and so on. This differs from a bucket-based approach, where the last observed price within each $\Delta$-minute interval is used. We prefer the fixed-grid approach because it makes the sampling rule explicit and because it will later allow us to align intraday returns across all 30 stocks when constructing realized covariance matrices.
+
+Daily realized variance is computed as:
+$$
+RV_d^{(\Delta)} = \sum_j \left(r_{d,j}^{(\Delta)}\right)^2,
+$$
+
+where $r_{d,j}^{(\Delta)}$ is the intraday log return over sampling interval.
+
+```{python}
+# ------------------------------------------------------------
+# 2. Keep AAPL only and sort by timestamp
+# ------------------------------------------------------------
+
+aapl_raw = (
+    hf_prices
+    .query("symbol == 'AAPL'")
+    .sort_values(["trading_day", "ts"])
+    .copy()
+)
+
+# Compute log price
+# High-frequency realized variance is based on log returns
+aapl_raw["log_price"] = np.log(aapl_raw["price"])
+```
+
+```{python}
+# ------------------------------------------------------------
+# 3. Check missing minute observations before forward-filling
+# ------------------------------------------------------------
+
+def missing_minutes_one_day(group):
+    """
+    Count missing minute observations within one trading day.
+
+    Missing observations are measured relative to a fixed regular
+    trading-hours grid from 09:30 to 15:59.
+
+    The grid uses the same timezone as the timestamp column.
+    """
+    
+    group = group.sort_values("ts").copy()
+    trading_day = group["trading_day"].iloc[0]
+
+    market_open = market_timestamp(trading_day, MARKET_OPEN)
+    market_close = market_timestamp(trading_day, MARKET_CLOSE)
+
+    full_grid = pd.date_range(
+        start=market_open,
+        end=market_close,
+        freq="1min"
+    )
+
+    observed_minutes = group["ts"].drop_duplicates()
+
+    expected_minutes = len(full_grid)
+    observed_minutes_count = observed_minutes.nunique()
+    missing_minutes = expected_minutes - observed_minutes_count
+    missing_share = missing_minutes / expected_minutes
+
+    return pd.Series({
+        "market_open": market_open,
+        "market_close": market_close,
+        "first_observed_timestamp": group["ts"].min(),
+        "last_observed_timestamp": group["ts"].max(),
+        "expected_minutes": expected_minutes,
+        "observed_minutes": observed_minutes_count,
+        "missing_minutes": missing_minutes,
+        "missing_share": missing_share
+    })
+
+
+aapl_missing_by_day = (
+    aapl_raw
+    .groupby("trading_day")
+    .apply(missing_minutes_one_day)
+    .reset_index()
+)
+
+overall_missing_share = (
+    aapl_missing_by_day["missing_minutes"].sum()
+    / aapl_missing_by_day["expected_minutes"].sum()
+)
+```
+
+
+```{python}
+# ------------------------------------------------------------
+# 4. Create regular one-minute grid and forward-fill missing prices
+# ------------------------------------------------------------
+
+# Create the fixed intraday minute grid.
+intraday_times = pd.date_range(
+    start=f"2000-01-01 {MARKET_OPEN}",
+    end=f"2000-01-01 {MARKET_CLOSE}",
+    freq="1min"
+).time
+
+# Use all AAPL trading days
+trading_days = np.sort(aapl_raw["trading_day"].unique())
+
+# Create a full grid of every trading day x every intraday minute
+grid = pd.MultiIndex.from_product(
+    [trading_days, intraday_times],
+    names=["trading_day", "time"]
+).to_frame(index=False)
+
+# Create timezone-aware timestamps for the full grid
+grid["ts"] = pd.to_datetime(
+    grid["trading_day"].astype(str) + " " + grid["time"].astype(str)
+)
+
+if TS_TZ is not None:
+    grid["ts"] = grid["ts"].dt.tz_localize(TS_TZ)
+
+# Prepare observed AAPL prices for merging onto the grid
+aapl_for_merge = (
+    aapl_raw
+    .copy()
+    .assign(time=lambda x: x["ts"].dt.time)
+    [["trading_day", "time", "price"]]
+)
+
+# Merge observed prices onto the fixed grid
+aapl_minute = (
+    grid
+    .merge(
+        aapl_for_merge,
+        on=["trading_day", "time"],
+        how="left"
+    )
+    .sort_values(["trading_day", "ts"])
+    .copy()
+)
+
+aapl_minute["symbol"] = "AAPL"
+
+# Previous-tick interpolation within each trading day only
+aapl_minute["price"] = (
+    aapl_minute
+    .groupby("trading_day")["price"]
+    .ffill()
+)
+
+# Drop missing prices before the first observed price of a day.
+# We do not backfill.
+aapl_minute = (
+    aapl_minute
+    .dropna(subset=["price"])
+    .sort_values(["trading_day", "ts"])
+    .reset_index(drop=True)
+)
+
+aapl_minute["log_price"] = np.log(aapl_minute["price"])
+
+minute_check = (
+    aapl_minute
+    .groupby("trading_day")
+    .size()
+    .rename("n_minutes_after_fill")
+    .reset_index()
+)
+```
+
+```{python}
+# ------------------------------------------------------------
+# 5. Function to compute daily realized variance
+# ------------------------------------------------------------
+
+def compute_daily_rv(data, sampling_minutes):
+    """
+    Compute daily realized variance for a given sampling interval.
+
+    Prices are sampled on a fixed grid relative to the market open.
+    For example, 10-minute sampling keeps 09:30, 09:40, 09:50, ...
+    """
+    
+    sampled = data.sort_values(["trading_day", "ts"]).copy()
+
+    sampled["market_open"] = sampled["trading_day"].apply(
+        lambda d: market_timestamp(d, MARKET_OPEN)
+    )
+
+    sampled["minutes_since_open"] = (
+        (sampled["ts"] - sampled["market_open"])
+        .dt.total_seconds()
+        / 60
+    ).round().astype(int)
+
+    # Keep only observations on the Delta-minute grid
+    sampled = sampled[
+        sampled["minutes_since_open"] % sampling_minutes == 0
+    ].copy()
+
+    # Compute intraday log returns within each trading day
+    sampled["intraday_return"] = (
+        sampled
+        .groupby("trading_day")["log_price"]
+        .diff()
+    )
+
+    rv_daily = (
+        sampled
+        .groupby("trading_day")
+        .agg(
+            realized_variance=(
+                "intraday_return",
+                lambda x: np.nansum(x ** 2)
+            ),
+            n_returns=(
+                "intraday_return",
+                lambda x: x.notna().sum()
+            )
+        )
+        .reset_index()
+    )
+
+    rv_daily["sampling_minutes"] = sampling_minutes
+
+    return rv_daily
+```
+
+```{python}
+# ------------------------------------------------------------
+# 6. Compute realized variance for all sampling intervals
+# ------------------------------------------------------------
+
+sampling_intervals = [1, 2, 5, 10, 15, 30, 60]
+
+rv_all = pd.concat(
+    [
+        compute_daily_rv(aapl_minute, interval)
+        for interval in sampling_intervals
+    ],
+    ignore_index=True
+)
+```
+
+```{python}
+# ------------------------------------------------------------
+# 7. Average realized variance and estimation uncertainty
+# ------------------------------------------------------------
+rv_summary = (
+    rv_all
+    .groupby("sampling_minutes")
+    .agg(
+        mean_rv=("realized_variance", "mean"),
+        sd_rv=("realized_variance", "std"),
+        n_days=("realized_variance", "count")
+    )
+    .reset_index()
+)
+
+rv_summary["se_rv"] = rv_summary["sd_rv"] / np.sqrt(rv_summary["n_days"])
+
+rv_summary["ci_lower"] = rv_summary["mean_rv"] - 1.96 * rv_summary["se_rv"]
+rv_summary["ci_upper"] = rv_summary["mean_rv"] + 1.96 * rv_summary["se_rv"]
+```
+
+As shown in @fig-aapl-volatility-signature, average realized variance is highest at the shortest sampling intervals and decreases as the sampling interval increases. This pattern is consistent with market microstructure noise at very high frequencies, such as bid-ask bounce, price discreteness, and stale prices. At very fine sampling intervals, these frictions can inflate realized variance because observed transaction prices deviate from the latent efficient price. Sampling less frequently reduces this noise, but very long sampling intervals also discard useful intraday information.
+
+```{python}
+#| label: fig-aapl-volatility-signature
+#| fig-cap: "Volatility signature plot for AAPL with 95% confidence intervals."
+#| fig-align: center
+
+# ------------------------------------------------------------
+# 8. Volatility signature plot with error bars
+# ------------------------------------------------------------
+
+plt.figure(figsize=(8, 5))
+
+plt.errorbar(
+    rv_summary["sampling_minutes"],
+    rv_summary["mean_rv"],
+    yerr=1.96 * rv_summary["se_rv"],
+    marker="o",
+    capsize=4,
+    linewidth=1.5,
+    label="Average daily realized variance"
+)
+
+plt.xlabel("Sampling interval $\\Delta$ in minutes")
+plt.ylabel("Average daily realized variance")
+plt.title("Volatility signature plot for AAPL")
+plt.xticks(sampling_intervals)
+plt.grid(True, alpha=0.3)
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+```
+The volatility signature plot shows that the average realized variance is highest at the shortest sampling intervals and falls substantially when moving from 1-minute to 5-minute sampling. This is consistent with the presence of market microstructure noise at very high frequencies. In the lecture slides, the observed log price is written as the latent efficient log price plus a noise component, $Y_{i\Delta_n}=X_{i\Delta_n}+U_{i\Delta_n}$, and the noise-driven fraction of return variance increases as $\Delta_n$ becomes small. Sampling less frequently therefore reduces the influence of bid-ask bounce, price discreteness and stale prices.
+
+We choose the standard realized variance estimator based on 5-minute log returns for the remainder of the analysis:
+
+$$
+RV_d^{(5)}=\sum_j \left(r_{d,j}^{(5)}\right)^2.
+$$
+
+This choice is also consistent with the empirical realized-volatility literature, where 5-minute returns are commonly used as a practical compromise between using high-frequency information and limiting market microstructure noise. Andersen and Bollerslev discuss the use of high-frequency intraday returns to obtain improved volatility measurements and refer to empirical analysis based on five-minute returns. At the same time, 5-minute sampling leaves approximately $390/5-1=77$ intraday returns per trading day. Since the subsequent realized covariance matrix is 30-dimensional, this helps avoid the rank problem emphasized in the lecture slides: when the return matrix has $T<N$, the sample covariance matrix is singular and cannot be inverted. Thus, 5-minute sampling is preferred to lower-frequency choices such as 15, 30 or 60 minutes, which would leave fewer intraday returns for estimating the $30 \times 30$ covariance matrix.
+
