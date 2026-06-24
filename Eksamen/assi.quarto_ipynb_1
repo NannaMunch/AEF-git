@@ -1,0 +1,132 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": [
+        "---\n",
+        "title: Exam 2026, Part 2\n",
+        "author: Exam number 45, 46 & 47\n",
+        "date: 2026-26-06\n",
+        "date-format: MMMM DD, YYYY\n",
+        "execute: \n",
+        "  echo: false\n",
+        "  warning: false\n",
+        "format:\n",
+        "  pdf: \n",
+        "    titlepage: true\n",
+        "    number-sections: false\n",
+        "    colorlinks: true\n",
+        "    geometry:\n",
+        "      - top=20mm\n",
+        "      - left=20mm\n",
+        "      - bottom=20mm\n",
+        "      - right=20mm\n",
+        "    bibliography: references.bib\n",
+        "    cite-method: natbib\n",
+        "    biblio-style: apalike  \n",
+        "    lang: en\n",
+        "    fontsize: 12pt\n",
+        "    highlight-style: github-light\n",
+        "---"
+      ],
+      "id": "79fc65d8"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "# standard library\n",
+        "from pathlib import Path\n",
+        "import itertools\n",
+        "\n",
+        "# data handling and model storage\n",
+        "import joblib\n",
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "import tidyfinance as tf\n",
+        "\n",
+        "# plotting\n",
+        "from plotnine import *\n",
+        "from mizani.formatters import percent_format\n",
+        "from IPython.display import Markdown\n",
+        "\n",
+        "# statistical models\n",
+        "import statsmodels.api as sm\n",
+        "\n",
+        "# machine learning\n",
+        "from sklearn.preprocessing import StandardScaler\n",
+        "from sklearn.linear_model import ElasticNet\n",
+        "from sklearn.ensemble import RandomForestRegressor\n",
+        "from sklearn.metrics import root_mean_squared_error"
+      ],
+      "id": "645187f9",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "# -------------------------------------------------\n",
+        "# 1. Load high-frequency minute price data\n",
+        "# -------------------------------------------------\n",
+        "\n",
+        "hf_prices = pd.read_parquet(\"/Users/AstridMoeller/Desktop/hf_minute_prices.parquet\")\n",
+        "\n",
+        "# Inspect structure\n",
+        "print(hf_prices.head())\n",
+        "print(hf_prices.dtypes)\n",
+        "print(hf_prices[\"symbol\"].nunique())"
+      ],
+      "id": "31544a25",
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "source": [
+        "# --------------------------------------------------------\n",
+        "# 2. Keep AAPL only and prepare time variables\n",
+        "# --------------------------------------------------------\n",
+        "\n",
+        "aapl_raw = (\n",
+        "    hf_prices\n",
+        "    .query(\"symbol == 'AAPL'\")\n",
+        "    .copy()\n",
+        ")\n",
+        "\n",
+        "aapl_raw[\"ts\"] = pd.to_datetime(aapl_raw[\"ts\"])\n",
+        "aapl_raw[\"trading_day\"] = aapl_raw[\"ts\"].dt.date\n",
+        "aapl_raw[\"log_price\"] = np.log(aapl_raw[\"price\"])\n",
+        "\n",
+        "aapl_raw = aapl_raw.sort_values([\"trading_day\", \"ts\"])\n",
+        "\n",
+        "# Check number of observations per day\n",
+        "day_check = (\n",
+        "    aapl_raw\n",
+        "    .groupby(\"trading_day\")\n",
+        "    .size()\n",
+        "    .rename(\"n_minutes\")\n",
+        "    .reset_index()\n",
+        ")\n",
+        "\n",
+        "print(day_check[\"n_minutes\"].describe())"
+      ],
+      "id": "1d89134d",
+      "execution_count": null,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "python3",
+      "language": "python",
+      "display_name": "Python 3 (ipykernel)",
+      "path": "/Users/AstridMoeller/Documents/GitHub/AEF-git/.venv/share/jupyter/kernels/python3"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 5
+}
