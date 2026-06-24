@@ -6,6 +6,8 @@ date-format: MMMM DD, YYYY
 execute: 
   echo: false
   warning: false
+  message: false
+  cache: true
 format:
   pdf: 
     titlepage: true
