@@ -1,0 +1,882 @@
+---
+title: "MA3 – Portfolio Backtesting with Transaction Costs"
+author: "Exam number 45, 46 & 47"
+date: "2026-05-01"
+execute: 
+  echo: false
+  warning: false
+  fig-width: 6
+  fig-height: 3
+format:
+  pdf: 
+    number-sections: false
+    colorlinks: true
+    geometry:
+      - top=20mm
+      - left=20mm
+      - bottom=20mm
+      - right=20mm
+    bibliography: references.bib
+    cite-method: natbib
+    biblio-style: apalike  
+    lang: en
+    fontsize: 12pt
+    highlight-style: github-light
+---
+
+```{python}
+import numpy as np
+import pandas as pd
+import joblib
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+from scipy.optimize import minimize
+from sklearn.covariance import LedoitWolf
+import os
+import warnings
+warnings.filterwarnings("ignore")
+
+np.random.seed(42)
+
+plt.rcParams.update({
+    "figure.dpi": 150,
+    "axes.spines.top": False,
+    "axes.spines.right": False,
+    "font.size": 10,
+})
+```
+
+## General remarks
+All members participated in the discussion of the empirical approach, interpretation of results, code review and final editing. All parts were jointly reviewed by the group. To make individual contributions transparent, the primary responsibility for the different parts is distributed as follows:
+Exam number 45: ex. 2 & 5. Exam number 46: ex. 3. Exam number 47: ex. 1 & 4.
+
+The use of generative AI tools is documented in the submitted GAI declaration.
+
+
+## Exercise 1 – Investment Universe
+We construct the investment universe from the CRSP monthly dataset. Following the assignment, we retain stocks from January 1980 onward with prices above $2 and market capitalisation above the 20th NYSE size percentile in each month. The breakpoint is calculated using NYSE stocks and applied to the full sample. These filters exclude small and illiquid stocks that are difficult to trade and tend to have noisier return data.
+
+```{python}
+#Load CRSP data and prepare date/price columns
+DATA_FILE = "/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Mandatory assignment 3/crsp_monthly.parquet"
+
+df_raw = pd.read_parquet(DATA_FILE)
+df_raw["date"] = pd.to_datetime(df_raw["date"])
+df_raw = df_raw.sort_values(["permno", "date"]).reset_index(drop=True)
+
+# Clean returns: remove extreme values and convert to numeric
+df_raw["ret"] = pd.to_numeric(df_raw["ret"], errors="coerce")
+df_raw.loc[df_raw["ret"] < -1, "ret"] = np.nan
+df_raw["ret_excess"] = pd.to_numeric(df_raw["ret_excess"], errors="coerce")
+df_raw["prc"] = df_raw["prc"].abs()
+
+# Keep observations from January 1980 onward
+df = df_raw[df_raw["date"] >= "1980-01-01"].copy()
+
+# Compute the monthly 20th NYSE size percentile breakpoint
+nyse_p20 = (
+    df[df["exchange"] == "NYSE"]
+    .groupby("date")["mktcap"]
+    .quantile(0.20)
+    .rename("nyse_p20")
+)
+
+df = df.join(nyse_p20, on="date")
+
+# Apply assignment filters: price > $2, market cap > 20th percentile, non-missing return
+mask = (
+    (df["prc"] > 2)
+    & (df["mktcap"] >= df["nyse_p20"])
+    & df["ret"].notna()
+)
+
+# Full filtered investment universe
+df_universe = df[mask].copy()
+
+#Compute universe size statistic
+n_per_month_full = df_universe.groupby("date")["permno"].nunique()
+avg_n_full = n_per_month_full.mean()
+min_n_full = n_per_month_full.min()
+max_n_full = n_per_month_full.max()
+```
+
+After applying the CRSP filters, the full filtered universe contains on average `{python} f"{avg_n_full:.0f}"` stocks per month, with a minimum of `{python} f"{min_n_full}"` and a maximum of `{python} f"{max_n_full}"`.
+For computational tractability in the subsequent portfolio optimisation exercises, we draw a fixed random subsample of 600 stocks from the filtered universe and use this sample throughout the backtest. This reduces the dimensionality of the covariance estimation and portfolio optimisation problem while keeping the stock selection reproducible through a fixed random seed.
+
+```{python}
+# Draw fixed random subsample for computational efficiency, using reproducible seed
+MAX_UNIVERSE_SIZE = 600
+np.random.seed(42)
+
+all_permnos = df_universe["permno"].unique()
+
+# Sample 600 stocks (or all if fewer available) and keep them fixed throughout backtest
+if len(all_permnos) > MAX_UNIVERSE_SIZE:
+    keep_permnos = np.random.choice(
+        all_permnos,
+        size=MAX_UNIVERSE_SIZE,
+        replace=False
+    )
+    df_filtered = df_universe[df_universe["permno"].isin(keep_permnos)].copy()
+else:
+    df_filtered = df_universe.copy()
+
+# Compute subsample universe size statistics
+n_per_month = df_filtered.groupby("date")["permno"].nunique()
+avg_n = n_per_month.mean()
+min_n = n_per_month.min()
+max_n = n_per_month.max()
+```
+
+After subsampling, the backtest universe contains on average `{python} f"{avg_n:.0f}"` stocks per month, with a minimum of `{python} f"{min_n}"` and a maximum of `{python} f"{max_n}"`. Thus, we report the full filtered CRSP universe required by the assignment, while the remaining analysis is performed on the fixed subsample. @fig-universe-size shows the evolution of the number of stocks used in the portfolio backtest over time.
+
+```{=latex}
+\newpage
+```
+
+**Figure 1: Investment universe size after CRSP filters and fixed subsampling.**
+
+
+```{python}
+#| label: fig-universe-size
+#| fig-pos: H
+
+fig, ax = plt.subplots(figsize=(6.5, 2.4))
+n_per_month.plot(ax=ax, color="steelblue", linewidth=0.8)
+ax.axhline(avg_n, color="red", linestyle="--", linewidth=0.8, label=f"Average = {avg_n:.0f}")
+ax.set_xlabel("Date")
+ax.set_ylabel("Number of stocks")
+ax.set_title("Backtest Universe Size")
+ax.legend()
+plt.tight_layout()
+plt.savefig("fig_universe_size.pdf", bbox_inches="tight")
+plt.show()
+```
+
+## Exercise 2 – Theoretical Foundation
+
+### 2a – Closed-Form Optimal Portfolio Weights
+The transaction-cost-adjusted certainty-equivalent maximisation problem is:
+$$
+\omega^*_{t+1} := \arg\max_{\omega \in \mathbb{R}^N,\, \iota'\omega=1}
+\omega' \hat\mu_t - \frac{\gamma}{2}\omega'\hat\Sigma_t\omega
+- \lambda(\omega - \omega_t^+)'\hat\Sigma_t(\omega - \omega_t^+)
+$$
+
+Taking the unconstrained first-order condition with respect to $\omega$ and ignoring the budget constraint momentarily gives:
+
+$$
+\hat\mu_t - \gamma \hat\Sigma_t\omega - 2\lambda\hat\Sigma_t(\omega - \omega_t^+) = 0
+$$
+
+$$
+(\gamma + 2\lambda)\hat\Sigma_t\omega = \hat\mu_t + 2\lambda\hat\Sigma_t\omega_t^+
+$$
+
+$$
+\omega = \frac{1}{\gamma+2\lambda}\hat\Sigma_t^{-1}\hat\mu_t + \frac{2\lambda}{\gamma+2\lambda}\omega_t^+
+$$
+
+Projecting onto the budget simplex $\iota'\omega=1$ yields the closed-form solution:
+
+$$
+\omega^*_{t+1}
+= \frac{1}{\gamma+2\lambda}A(\hat\Sigma_t)\hat\mu_t
++ \frac{2\lambda}{\gamma+2\lambda}\omega_t^+
++ \frac{1}{\iota'\hat\Sigma_t^{-1}\iota}\hat\Sigma_t^{-1}\iota \cdot c
+$$
+
+where $A(\Sigma)=\Sigma^{-1}-\frac{\Sigma^{-1}\iota\iota'\Sigma^{-1}}{\iota'\Sigma^{-1}\iota}$ is the excess-return projection matrix and the scalar $c$ enforces $\iota'\omega^*=1$. Writing the unconstrained mean-variance portfolio (ignoring $\lambda$) as $\omega^{\text{mv}}_t = \frac{1}{\gamma}A(\hat\Sigma_t)\hat\mu_t + \omega^{\text{gmv}}_t$, where $\omega^{\text{gmv}}_t = \hat\Sigma_t^{-1}\iota/(\iota'\hat\Sigma_t^{-1}\iota)$ is the global minimum-variance portfolio, the solution simplifies to:
+
+$$
+\omega^*_{t+1}
+= \underbrace{\frac{\gamma}{\gamma+2\lambda}}_{\equiv \alpha}\,\omega^{\text{mv}}_t
++ \underbrace{\frac{2\lambda}{\gamma+2\lambda}}_{1-\alpha}\,\omega_t^+
+$$
+
+This is a convex combination — since $\alpha + (1-\alpha) = 1$ and both terms lie in $(0,1)$ for any $\lambda,\gamma>0$ — between the unconstrained mean-variance portfolio and the current, pre-rebalancing holding $\omega_t^+$.
+
+The parameter $\lambda$ determines how strongly the optimal portfolio is pulled towards the current holdings $\omega_t^+$. When $\lambda \to 0$, transaction costs become negligible and the investor fully rebalances to the unconstrained mean-variance portfolio. In contrast, when $\lambda \to \infty$, rebalancing becomes prohibitively expensive and the investor remains at the no-trade position $\omega_t^+$. For intermediate values, $\lambda$ acts as a regularization parameter that reduces portfolio turnover by shrinking the optimal allocation towards current holdings. This is consistent with the intuition in @Hautsch.2019, where transaction costs discourage large portfolio adjustments and thereby regularize the portfolio choice problem.
+
+### 2b – Realism of Variance-Proportional Transaction Costs
+Modelling transaction costs as $\lambda(\omega-\omega_t^+)'\hat\Sigma_t(\omega-\omega_t^+)$ implies that rebalancing costs depend on both asset volatility and covariance. Consequently, trading volatile stocks becomes more expensive, which is plausible since bid-ask spreads and price impact tend to be larger for riskier securities.
+
+However, this specification is not fully realistic. Empirical studies @Toth.2011 and @Engle.2012 generally find that transaction costs are more closely related to turnover, liquidity, and market impact than to the covariance structure of the portfolio itself.
+
+The covariance-proportional specification is therefore best viewed as an analytically convenient approximation. It yields a closed-form solution and makes the effect of transaction costs easy to analyse, but it could over penalise trading in high-volatility periods and under penalise it in calmer market conditions relative to actual trading costs.
+
+### 2c – Implementation
+
+We implement the closed-form solution from Exercise 2a using the function `compute_weights(mu, Sigma, gamma, lam, w_prev)`. The function solves for optimal portfolio weights by computing the unconstrained mean-variance portfolio and blending it with the previous period's weights according to $\alpha = \gamma/(\gamma + 2\lambda)$, which yields $\omega^* = \alpha \omega^{mv} + (1-\alpha)\omega^+$. Throughout the assignment, we set $\gamma = 4$.
+
+For numerical robustness, we use the Moore-Penrose pseudo-inverse (`numpy.linalg.pinv`) rather than the standard matrix inverse, since the covariance matrix may be singular or nearly singular in high dimensions. We also clip portfolio weights to the range $[-300, 300]$ before renormalizing to prevent extreme leverage from poorly conditioned covariance matrices.
+
+For Exercise 5d, we implement a constrained variant, `compute_weights_no_short`, that enforces $\omega \geq 0$ (no short-selling). Since this constraint removes the closed-form solution, we solve the optimization problem numerically using sequential least-squares quadratic programming (SLSQP) via `scipy.optimize.minimize`.
+
+```{python}
+# Risk aversion coefficient (fixed throughout the assignment)
+GAMMA = 4  
+
+def compute_weights(mu, Sigma, gamma, lam, w_prev):
+    """
+    Compute optimal portfolio weights using the closed-form solution from Exercise 2a.
+    Implements the convex combination: ω* = α·ω_mv + (1-α)·ω_prev
+    where α = γ/(γ + 2λ)
+    """
+    N = len(mu)
+    # Blending parameter: controls trade-off between mean-variance and previous holdings
+    alpha = gamma / (gamma + 2 * lam)
+
+    # Compute inverse covariance using pseudo-inverse for numerical stability
+    Sigma_inv = np.linalg.pinv(Sigma)
+    iota = np.ones(N)
+    iota_Sinv = Sigma_inv @ iota
+    denom = iota @ iota_Sinv
+
+    # Global minimum-variance portfolio (minimum risk, fully diversified)
+    w_gmv = iota_Sinv / denom
+
+    # Excess-return projection: contribution of expected returns to optimal portfolio
+    A_mu = Sigma_inv @ mu - (iota_Sinv @ mu / denom) * iota_Sinv
+
+    #Unconstrained mean-variance portfolio (ignoring transaction costs)
+    w_mv = (1.0 / gamma) * A_mu + w_gmv
+
+    # Blend: move from previous holdings toward mean-variance portfolio
+    w_star = alpha * w_mv + (1.0 - alpha) * w_prev
+
+    # Clip extreme weights to prevent excessive leverage
+    w_star = np.clip(w_star, -3.0, 3.0)
+
+    # Normalize to sum to 1 (budget constraint)
+    denom_w = w_star.sum()
+    return w_star / denom_w if abs(denom_w) > 1e-6 else np.ones(N) / N
+```
+
+```{python}
+
+def compute_weights_no_short(mu, Sigma, gamma, lam, w_prev):
+    """
+    Compute optimal portfolio weights with short-sale constraint (ω ≥ 0).
+    Solves the constrained optimization problem numerically using SLSQP.
+    """
+    N = len(mu)
+    scale = gamma + 2 * lam
+
+    # Adjust expected return vector to account for transaction cost dampening
+    mu_eff = mu + 2 * lam * (Sigma @ w_prev)
+
+    # Define objective function and gradient for numerical optimization
+    objective = lambda w: 0.5 * scale * w @ Sigma @ w - mu_eff @ w
+    gradient  = lambda w: scale * Sigma @ w - mu_eff
+    
+    # Constraints: weights sum to 1, and each weight ≥ 0 (no shorting)
+    constraints = [{"type": "eq", "fun": lambda w: w.sum() - 1}]
+    bounds = [(0.0, 1.0)] * N
+
+    # Start from equal-weight portfolio
+    w0 = np.ones(N) / N
+
+    # Solve using Sequential Least-Squares Quadratic Programming
+    result = minimize(objective, w0, jac=gradient, method="SLSQP",
+                       bounds=bounds, constraints=constraints,
+                       options={"ftol": 1e-9, "maxiter": 500})
+    #Return solution if converged, else fall back to equal-weight
+    if result.success:
+        w = np.clip(result.x, 0, None)
+        return w / w.sum()
+    return w0
+
+# Sanity check: test weights sum to 1 on a simple 5-asset diagonal covariance matrix
+np.random.seed(0)
+N_test = 5
+mu_test = np.random.randn(N_test) * 0.01
+S_test = np.eye(N_test) * 0.04
+w_prev_test = np.ones(N_test) / N_test
+w_test = compute_weights(mu_test, S_test, GAMMA, 0.1, w_prev_test)
+```
+
+As a sanity check, applying `compute_weights` to a small five-asset toy example with a diagonal covariance matrix returns weights summing to `{python} f"{w_test.sum():.4f}"`, confirming the budget constraint is satisfied to numerical precision.
+
+## Exercise 3 – Covariance Matrix Estimation
+### 3a - Rolling Window Covariance Estimation
+We estimate $\hat\Sigma_t$ using a rolling window of the previous 120 months of returns. The 120-month window length balances two competing objectives: (i) obtaining sufficient observations to estimate a stable $N \times N$ covariance matrix, and (ii) allowing the covariance structure to adapt to long-term shifts in volatility and correlation regimes. With approximately 71 available stocks per month and 120 observations, the ratio $N/T \approx 0.71$ ensures the covariance matrix is well-conditioned, in contrast to the more ill-conditioned regime ($N/T \approx 2.89$) that would result from a shorter 36-month window. This substantial improvement in conditioning directly translates to more stable portfolio weights and lower turnover, enabling portfolio optimization to compete with naive diversification.
+
+Stocks must have at least 70% non-missing observations within the window to be included, and any remaining missing values are filled using the stock's average return within the estimation window. We considered a factor-model approach but chose the rolling-window estimator to keep the analysis self-contained and transparent.
+
+In addition to the sample covariance matrix $\hat\Sigma_t$, we estimate a Ledoit-Wolf shrinkage covariance matrix, $\hat\Sigma_t^{LW}$, using sklearn.covariance.LedoitWolf. The estimator shrinks the sample covariance towards a more stable target matrix, reducing estimation error and improving numerical stability.
+
+A practical challenge is that the number of assets can exceed the 120-month estimation window, causing the sample covariance matrix to be singular or poorly conditioned. To address this, we regularise the covariance matrix by flooring small eigenvalues at 10% of the largest eigenvalue before reconstructing the matrix. This ensures that the covariance matrix remains invertible and well-conditioned. Ledoit-Wolf shrinkage achieves a similar objective by shrinking the covariance matrix towards a better-conditioned target, motivating the comparison between the two estimators in Exercise 5.
+
+```{python}
+# Rolling window length: 120 months balances stability vs adapbility
+ROLLING_WINDOW = 120  
+# Minimum fraction of non-missing returns required to include a stock
+MIN_OBS_FRAC   = 0.70 
+
+def regularise_by_eigenvalue_floor(Sigma_raw, floor_frac=0.10):
+    """
+    Regularize covariance matrix by flooring small eigenvalues.
+    This improves numerical stability when the covariance matrix is ill-conditioned.
+    """
+    # Eigenvalue decomposition
+    eigval, eigvec = np.linalg.eigh(Sigma_raw)
+
+    # Florr small eigenvalues at 10% of the largest eigenvalue
+    eigval_floored = np.clip(eigval, floor_frac * eigval.max(), None)
+
+    # Reconstruct regularized covariance matrix
+    Sigma_reg = eigvec @ np.diag(eigval_floored) @ eigvec.T
+
+    # Ensure symmetry (numerical safety)
+    return (Sigma_reg + Sigma_reg.T) / 2
+```
+
+### 3b - Comparison of Sample and Ledoit-Wolf Estimators
+```{python}
+# Create time-series cross-sectional pivots (date x stock) for easier manipulation
+ret_panel = (df_filtered
+             .pivot_table(index="date", columns="permno", values="ret")
+             .sort_index())
+
+excess_panel = (df_filtered
+                .pivot_table(index="date", columns="permno", values="ret_excess")
+                .sort_index())
+```
+
+```{python}
+# Extract the most recent 120-month window before end of out-of-sample period
+last_oos_date = pd.Timestamp("2024-12-31")
+window_dates  = ret_panel.index[ret_panel.index < last_oos_date]
+w_start = window_dates[-ROLLING_WINDOW]
+
+# Require at least 70% observations per stock to include it
+min_obs_comp = int(MIN_OBS_FRAC * ROLLING_WINDOW)
+
+ret_w_compare = ret_panel.loc[w_start:window_dates[-1]].dropna(
+    axis=1,
+    thresh=min_obs_comp
+)
+
+# Fill remaining missing values with stock's mean return
+ret_w_compare = ret_w_compare.fillna(ret_w_compare.mean())
+X_comp = ret_w_compare.values
+N_comp = X_comp.shape[1]
+
+# Estimate sample covariance with eigenvalue regularization
+Sigma_s = regularise_by_eigenvalue_floor(np.cov(X_comp, rowvar=False))
+
+# Estimate Ledoit-Wolf shrinkage covariance (shrinks toward better-conditioned target)
+lw_c = LedoitWolf()
+lw_c.fit(X_comp)
+Sigma_lw_c = lw_c.covariance_
+
+def gmv_weights(Sigma):
+    """Compute global minimum-variance portfolio weights."""
+    N = Sigma.shape[0]
+    Si = np.linalg.pinv(Sigma)
+    iota = np.ones(N)
+    return Si @ iota / (iota @ Si @ iota)
+
+# Compute GMV weights from both estimators
+w_gmv_s  = gmv_weights(Sigma_s)
+w_gmv_lw = gmv_weights(Sigma_lw_c)
+
+# Compare the two weight vectors
+diff_l1 = np.abs(w_gmv_s - w_gmv_lw).sum()
+diff_l2 = np.linalg.norm(w_gmv_s - w_gmv_lw)
+```
+
+To compare the sample and Ledoit-Wolf covariance estimators more directly, we compute the global minimum-variance portfolio implied by each, using the most recent out-of-sample rolling window (`{python} f"N={N_comp}"` stocks). The two resulting weight vectors differ by an $L_1$ distance of `{python} f"{diff_l1:.2f}"` and an $L_2$ distance of `{python} f"{diff_l2:.3f}"`; the Ledoit-Wolf shrinkage intensity selected automatically for this window is `{python} f"{lw_c.shrinkage_:.2f}"`.
+
+@fig-cov-comparison visualises this comparison. The scatter plot on the left shows that the two sets of weights are positively correlated but not identical, with the Ledoit-Wolf weights generally pulled closer to zero — visible as the cloud of points sitting above the 45-degree line for negative sample-covariance weights and below it for positive ones. The histogram on the right confirms this: the Ledoit-Wolf weight distribution is visibly more concentrated around zero, with fewer extreme positions in either direction, consistent with its role as a shrinkage estimator that pulls the covariance matrix — and hence the resulting portfolio — towards a more conservative, better-conditioned target.
+
+**Figure 2: Comparison of global minimum-variance weights implied by the sample covariance matrix and the Ledoit-Wolf covariance estimator.**
+
+```{python}
+#| label: fig-cov-comparison
+#| fig-pos: H
+
+fig, axes = plt.subplots(1, 2, figsize=(6.5, 2.6))
+axes[0].scatter(w_gmv_s, w_gmv_lw, alpha=0.3, s=8, color="steelblue")
+axes[0].axline((0,0), slope=1, color="red", linestyle="--", linewidth=0.8)
+axes[0].set_xlabel("GMV weights – Sample Cov.")
+axes[0].set_ylabel("GMV weights – Ledoit-Wolf")
+axes[0].set_title("Weight comparison: Sample vs LW")
+axes[1].hist(w_gmv_s,  bins=60, alpha=0.6, label="Sample", color="steelblue")
+axes[1].hist(w_gmv_lw, bins=60, alpha=0.6, label="LW",     color="orange")
+axes[1].set_xlabel("Portfolio weight")
+axes[1].set_ylabel("Count")
+axes[1].set_title("Distribution of GMV Weights")
+axes[1].legend()
+plt.tight_layout()
+plt.show()
+```
+
+## Exercise 4 – Expected Return Estimation
+Following the assignment, we use predicted excess returns from our preferred MA2 machine-learning model (Elastic Net) as estimates of $\hat\mu_t$. The fitted MA2 model, scaler, and feature definitions are loaded directly from the saved model bundle, and the preprocessing steps from MA2 are reproduced exactly to ensure consistency.
+
+Because characteristics observed in month $t$ are used to predict returns in month $t+1$, the resulting forecasts are shifted forward one month before entering the portfolio optimisation. If MA2 predictions are unavailable for a given stock-month, we fall back on a shrunk rolling historical mean of excess returns. This fallback is multiplied by a shrinkage factor of `MU_SHRINK = 0.05`, motivated by the mean-variance error-maximisation problem described by @Michaud.1989 and related to the Bayes-Stein shrinkage approach of @Jorion.1986 . Shrinking the historical mean towards zero reduces estimation noise and produces more stable portfolio weights.
+
+```{python}
+MU_SHRINK = 0.05  # Shrinkage applied ONLY to the historical-mean fallback
+
+# Load the fitted MA2 bundle (Elastic Net: preferred model in MA2)
+MA2_BUNDLE_PATH = "/Users/nannamunch/Documents/GitHub/AEF-git/Aflevering2/ma2_elastic_net_bundle.joblib"
+bundle          = joblib.load(MA2_BUNDLE_PATH)
+ma2_model       = bundle["model"]
+ma2_scaler      = bundle["scaler"]
+feature_columns = bundle["feature_columns"]
+cont_feats      = bundle["continuous_features"]
+stock_chars     = bundle["stock_chars"]
+macro_vars      = bundle["macro_vars"]
+
+# Load the characteristics panel MA2 was built from
+CHARS_FILE = "/Users/nannamunch/Desktop/Kandidat Økonomi/Advanced empirical finance/Mandatory assignment 2/stock_characteristics_monthly.parquet"
+chars = pd.read_parquet(CHARS_FILE)
+chars["date"] = pd.to_datetime(chars["date"])
+chars = chars[["permno", "date", "sic2"] + stock_chars + macro_vars].copy()
+
+# Reproduce MA2 preprocessing exactly
+for col in stock_chars:
+    # Monthly cross-sectional median
+    chars[col] = chars.groupby("date")[col].transform(lambda x: x.fillna(x.median()))
+chars[macro_vars] = chars[macro_vars].ffill().bfill()
+
+def recode_sic(sic):
+    """Recode SIC codes into industry divisions."""
+    if pd.isna(sic):
+        return "Other"
+    sic = int(sic)
+    if sic < 10:   return "Agriculture"
+    elif sic < 15: return "Mining"
+    elif sic < 18: return "Construction"
+    elif sic < 40: return "Manufacturing"
+    elif sic < 50: return "Transportation"
+    elif sic < 52: return "Wholesale"
+    elif sic < 60: return "Retail"
+    elif sic < 70: return "Finance"
+    elif sic < 90: return "Services"
+    else:          return "Public Admin"
+
+chars["sic_division"] = chars["sic2"].apply(recode_sic)
+
+# Characteristic x macro interactions
+for s in stock_chars:
+    for m in macro_vars:
+        chars[f"{s}_x_{m}"] = chars[s] * chars[m]
+
+sic_dummies = pd.get_dummies(chars["sic_division"], prefix="sic", drop_first=True, dtype=int)
+chars = pd.concat([chars, sic_dummies], axis=1)
+
+# Standardize continuous block with the saved MA2 scaler, align to MA2 column order
+chars[cont_feats] = ma2_scaler.transform(chars[cont_feats])
+X_chars = chars.reindex(columns=feature_columns, fill_value=0).fillna(0.0)
+
+# Generate ML predictions from characteristics
+chars["mu_hat"] = ma2_model.predict(X_chars)
+
+# Features in month T predict the return of month T+1 -> shift to target month
+chars["target_month"] = chars["date"].dt.to_period("M") + 1
+mu_by_month = {
+    period: g.set_index("permno")["mu_hat"]
+    for period, g in chars.groupby("target_month")
+}
+
+def get_ml_predicted_returns(date, available_permnos=None):
+    """Get MA2-predicted excess returns for holding month `date`."""
+    return mu_by_month.get(pd.Timestamp(date).to_period("M"))
+```
+
+## Exercise 5 – Portfolio Backtest
+We evaluate the four strategies specified in the assignment over the out-of-sample period January 2010 to December 2024, using only information available up to each rebalancing date. Following the assignment, the transaction-cost parameter is fixed at $\lambda=0.10$ (1,000 basis points). At each month, we estimate the sample covariance matrix, its Ledoit-Wolf counterpart, and the expected-return vector using the preceding 120 months of data.
+
+The four strategies are: (a) naive diversification with equal weights $1/N$; (b) transaction-cost-adjusted mean-variance using the eigenvalue-floored sample covariance and the shrunk historical-mean expected return; (c) the same optimisation using the Ledoit-Wolf covariance estimator; and (d) a short-sale-constrained mean-variance portfolio using the Ledoit-Wolf covariance matrix and the constrained optimisation from Exercise 2c.
+
+Portfolio returns are computed from realised stock returns. Following Hautsch and Voigt (2019, eq. 45–46), monthly turnover is measured as the $L_1$ distance between the new portfolio weights and the previous portfolio after return drift. All performance statistics are reported net of proportional transaction costs of 50 basis points per unit of turnover, consistent with @Hautsch.2019 and @DeMiguel.2009.
+
+```{python}
+# Transaction cost parameter: 1000 basis points = 0.10
+LAMBDA  = 0.10
+OOS_START = "2010-01-01"
+OOS_END   = "2024-12-31"
+
+# Extract all out-of-sample dates
+oos_dates = ret_panel.loc[OOS_START:OOS_END].index
+```
+
+```{python}
+# Initialize storage for results: returns, turnover, dates for each strategy
+strategies = ["naive", "tc_mv", "tc_mv_lw", "mv_noshort"]
+results = {s: {"ret": [], "turnover": [], "dates": []} for s in strategies}
+w_prev = {s: None for s in strategies}
+
+# Track MA2 prediction coverage for reporting
+ml_months = 0
+ml_cov = []
+
+# Pre-computate date-to-index mapping for faster lookups
+date_to_pos = {date: i for i, date in enumerate(oos_dates)}
+
+
+def compute_turnover(w_new, w_pre):
+    """
+    Compute portfolio turnover as L1 distance between new and pre-rebalancing weights.
+    Turnover = sum(|w_new - w_pre|) measures the absolute amount of rebalancing.
+    """
+    return np.sum(np.abs(w_new - w_pre))
+
+
+def get_w_prev(strategy, permnos, date):
+    """
+    Get pre-rebalancing weights for the current month.
+    Previous portfolio is aligned to current universe and drifted forward using last month's returns.
+    """
+    if w_prev[strategy] is None:
+        # First month: initialize with equal weights
+        return np.ones(len(permnos)) / len(permnos)
+
+    # Retrieve previous weights and their corresponding stocks
+    prev_w_series, prev_permnos = w_prev[strategy]
+    prev_dict = dict(zip(prev_permnos, prev_w_series))
+
+    # Align previous weights to the current universe (handle new/missing stocks)
+    w_arr = np.array([prev_dict.get(p, 0.0) for p in permnos])
+
+    # Drift previous weights forward using last month's realized returns
+    prev_date_idx = date_to_pos[date] - 1
+
+    if prev_date_idx >= 0:
+        prev_date = oos_dates[prev_date_idx]
+        prev_ret = ret_panel.loc[prev_date, permnos].fillna(0).values
+
+        # Apply return drift: w_drifted = w_prev * (1+r) / sum[w_prev * (1 + r)]
+        gross = w_arr * (1 + prev_ret)
+
+        if gross.sum() > 0:
+            w_arr = gross / gross.sum()
+
+    # Normalise or fall back to equal weights
+    if w_arr.sum() > 0:
+        w_arr = w_arr / w_arr.sum()
+    else:
+        w_arr = np.ones(len(permnos)) / len(permnos)
+
+    return w_arr
+
+
+# Run backtest loop over all out-of-sample dates
+for t_idx, date in enumerate(oos_dates):
+
+    # Extract realized returns for current month
+    oos_ret = ret_panel.loc[date]
+    valid_permnos = oos_ret.dropna().index.tolist()
+
+    # Skip months with insufficient data
+    if len(valid_permnos) < 30:
+        continue
+
+    # Extract 120-month estimation window (all dates before current month)
+    window_end = ret_panel.index[ret_panel.index < date]
+
+    if len(window_end) < ROLLING_WINDOW:
+        continue
+
+    window_start = window_end[-ROLLING_WINDOW]
+    ret_window_full = ret_panel.loc[window_start:window_end[-1], valid_permnos]
+
+    # Require at least 70% non-missing observations per stock
+    min_obs = int(MIN_OBS_FRAC * ROLLING_WINDOW)
+    ret_window = ret_window_full.dropna(axis=1, thresh=min_obs)
+    permnos_w = ret_window.columns.tolist()
+
+    # Skip if too few stocks available
+    if len(permnos_w) < 20:
+        continue
+
+    N_w = len(permnos_w)
+
+    # Prepare return matrices: fill remaining NaN with stock means
+    ret_w_filled = ret_window.fillna(ret_window.mean(axis=0))
+    X = ret_w_filled.values
+
+    excess_window = excess_panel.loc[window_start:window_end[-1], permnos_w]
+    excess_w_filled = excess_window.fillna(excess_window.mean(axis=0))
+
+    # ======= Estimate covariance matrices===========
+    # Sample covariance with eigenvalue flooring for numerical stability
+    Sigma_sample = regularise_by_eigenvalue_floor(np.cov(X, rowvar=False))
+
+    # Ledoit-Wolf skrinkage covariance (pulls toward stable target)
+    lw_est = LedoitWolf()
+    lw_est.fit(X)
+    Sigma_lw = lw_est.covariance_
+
+    # ======== Estimate expected returns ========
+    # Try to get ML predictions first; fall back to shrunk historical mean
+    ml_mu = get_ml_predicted_returns(date, permnos_w)
+
+    if ml_mu is not None:
+        # Use ML predictions (available in 2010-2021)
+        aligned = ml_mu.reindex(permnos_w)
+        ml_months += 1
+        ml_cov.append(aligned.notna().mean())
+
+        mu_vec = aligned.fillna(ml_mu.mean()).values
+
+    else:
+        # Fallback: shrunk rolling historical mean (used in 2022-2024)
+        mu_series = excess_w_filled.mean(axis=0)
+        # Clip outliers at 1st and 99th percentiles to reduce estimation noise
+        lo, hi = mu_series.quantile(0.01), mu_series.quantile(0.99)
+        # Apply shrinkage factor of 0.05 to reduce estimation error (Michaud 1989)
+        mu_vec = MU_SHRINK * mu_series.clip(lo, hi).values
+
+   # Get relized returns for current month
+    realized_ret = oos_ret.reindex(permnos_w).fillna(0).values
+
+    # ===== Get Pre-Rebalancing Weights =====
+    # Pre-rebalancing weights = previous optimal weights drifted forward by last month's returns
+    w0_naive = get_w_prev("naive", permnos_w, date)
+    w0_mv = get_w_prev("tc_mv", permnos_w, date)
+    w0_lw = get_w_prev("tc_mv_lw", permnos_w, date)
+    w0_ns = get_w_prev("mv_noshort", permnos_w, date)
+
+    # ===== Compute New Portfolio Weights =====
+    w_naive = np.ones(N_w) / N_w
+    w_mv = compute_weights(mu_vec, Sigma_sample, GAMMA, LAMBDA, w0_mv)
+    w_mv_lw = compute_weights(mu_vec, Sigma_lw, GAMMA, LAMBDA, w0_lw)
+    w_ns = compute_weights_no_short(mu_vec, Sigma_lw, GAMMA, LAMBDA, w0_ns)
+
+    # ===== Record Results =====
+    # Compute returns and turnover for each strategy
+    for strat, w_new, w_pre in [
+        ("naive", w_naive, w0_naive),
+        ("tc_mv", w_mv, w0_mv),
+        ("tc_mv_lw", w_mv_lw, w0_lw),
+        ("mv_noshort", w_ns, w0_ns),
+    ]:
+        # Portfolio return = weights · realized returns
+        port_ret = w_new @ realized_ret
+        # Turnover = L1 distance between new and pre-rebalancing weights
+        turnover = compute_turnover(w_new, w_pre)
+
+        # Store monthly results
+        results[strat]["ret"].append(port_ret)
+        results[strat]["turnover"].append(turnover)
+        results[strat]["dates"].append(date)
+
+        # Update previous weights for next month's rebalancing
+        w_prev[strat] = (w_new, permnos_w)
+
+
+# Calculate ML prediction coverage statistics
+ml_month_share = ml_months / len(oos_dates)
+
+if ml_cov:
+    avg_ml_coverage = np.mean(ml_cov)
+else:
+    avg_ml_coverage = np.nan
+```
+
+```{python}
+# Transaction cost rate: 50 basis points per unit turnover
+TC_RATE = 0.005  
+
+def build_result_df(strat):
+    """Build results DataFrame for a strategy, computing net returns after transaction costs."""
+    d = results[strat]
+    df_s = pd.DataFrame({
+        "date": d["dates"],
+        "gross_ret": d["ret"],
+        "turnover": d["turnover"]
+    }).set_index("date")
+    df_s["net_ret"] = df_s["gross_ret"] - TC_RATE * df_s["turnover"]
+    return df_s
+
+# Build result dataframes for all strategies
+result_dfs = {s: build_result_df(s) for s in strategies}
+
+def annualised_sharpe(ret_series):
+    """Compute annualized Sharpe ratio from monthly returns."""
+    mu  = ret_series.mean() * 12
+    sig = ret_series.std()  * np.sqrt(12)
+    return mu / sig if sig > 0 else np.nan
+
+def annualised_mean(ret_series):
+    """Compute annualized mean return from monthly returns."""
+    return ret_series.mean() * 12 * 100
+
+# Strategy labels for reporting
+strategy_labels = {
+    "naive":      "Naïve 1/N",
+    "tc_mv":      "TC-MV (Sample Cov.)",
+    "tc_mv_lw":   "TC-MV (Ledoit-Wolf)",
+    "mv_noshort": "MV No Short-Sale (LW)",
+}
+
+# ===== Build Full-Sample Performance Summary Table =====
+rows_full = []
+for s in strategies:
+    df_s = result_dfs[s]
+    net  = df_s["net_ret"]
+    rows_full.append({
+        "Strategy": strategy_labels[s],
+        "Ann. Sharpe (net TC)": f"{annualised_sharpe(net):.3f}",
+        "Ann. Mean Ret. % (net TC)": f"{annualised_mean(net):.2f}",
+        "Avg Monthly Turnover": f"{df_s['turnover'].mean()*100:.1f}%",
+    })
+summary_table_full = pd.DataFrame(rows_full).set_index("Strategy")
+
+# ===== Build Period-by-Period Breakdown (2010-2021 vs 2022-2024) =====
+ma2_end = pd.Timestamp("2021-12-31")
+period_breakdown_rows = []
+
+for period_label, period_func in [
+    ("2010-2021\n(MA2 Predictions)", lambda df: df.index <= ma2_end),
+    ("2022-2024\n(Fallback)", lambda df: df.index > ma2_end),
+]:
+    for s in strategies:
+        df_period = result_dfs[s]
+        mask = period_func(df_period)
+        
+        if mask.sum() > 0:
+            net = df_period.loc[mask, "net_ret"]
+            sharpe = annualised_sharpe(net)
+            ret_mean = annualised_mean(net)
+            
+            period_breakdown_rows.append({
+                "Period": period_label,
+                "Strategy": strategy_labels[s],
+                "Sharpe": f"{sharpe:.3f}",
+                "Return %": f"{ret_mean:.2f}"
+            })
+
+period_breakdown_df = pd.DataFrame(period_breakdown_rows)
+# Pivot to get strategies × periods comparison
+summary_table_period = period_breakdown_df.pivot_table(
+    values="Sharpe", 
+    index="Strategy", 
+    columns="Period",
+    aggfunc="first"
+)
+```
+
+@tbl-performance reports the annualised, net-of-transaction-cost Sharpe ratios, mean excess returns, and average monthly turnover for all four strategies over the full out-of-sample period from January 2010 to December 2024.
+
+**Table 1: Out-of-sample portfolio performance from January 2010 to December 2024.**
+
+```{=latex}
+\begingroup
+\footnotesize
+```
+```{python}
+#| label: tbl-performance
+#| tbl-pos: H
+from IPython.display import display
+display(summary_table_full)
+```
+
+```{=latex}
+\endgroup
+```
+
+@tbl-period-breakdown breaks down performance into two sub-periods: 2010–2021, when MA2 Elastic Net predictions are available, and 2022–2024, when strategies rely on the shrunk historical-mean fallback. This comparison reveals whether the optimization advantage is driven by strong ML signals or merely reflects the stable covariance conditioning provided by the 120-month window.
+
+**Table 2: Sharpe ratios by period: 2010–2021 (MA2 predictions) versus 2022–2024 (fallback).**
+
+```{=latex}
+\begingroup
+\footnotesize
+```
+```{python}
+#| label: tbl-period-breakdown
+#| tbl-pos: H
+display(summary_table_period)
+```
+
+```{=latex}
+\endgroup
+```
+
+
+```{python}
+# Extract key metrics dynamically for use in discussion text
+sharpe_naive_full = float(summary_table_full.loc["Naïve 1/N", "Ann. Sharpe (net TC)"])
+sharpe_tcmv_full = float(summary_table_full.loc["TC-MV (Sample Cov.)", "Ann. Sharpe (net TC)"])
+sharpe_tcmvlw_full = float(summary_table_full.loc["TC-MV (Ledoit-Wolf)", "Ann. Sharpe (net TC)"])
+sharpe_noshort_full = float(summary_table_full.loc["MV No Short-Sale (LW)", "Ann. Sharpe (net TC)"])
+
+turnover_naive = float(summary_table_full.loc["Naïve 1/N", "Avg Monthly Turnover"].strip("%")) 
+turnover_tcmv = float(summary_table_full.loc["TC-MV (Sample Cov.)", "Avg Monthly Turnover"].strip("%"))
+turnover_tcmvlw = float(summary_table_full.loc["TC-MV (Ledoit-Wolf)", "Avg Monthly Turnover"].strip("%"))
+turnover_noshort = float(summary_table_full.loc["MV No Short-Sale (LW)", "Avg Monthly Turnover"].strip("%"))
+
+# Extract period-by-period Sharpe ratios
+sharpe_naive_ma2 = float(summary_table_period.loc["Naïve 1/N", "2010-2021\n(MA2 Predictions)"])
+sharpe_tcmv_ma2 = float(summary_table_period.loc["TC-MV (Sample Cov.)", "2010-2021\n(MA2 Predictions)"])
+sharpe_naive_fallback = float(summary_table_period.loc["Naïve 1/N", "2022-2024\n(Fallback)"])
+sharpe_tcmv_fallback = float(summary_table_period.loc["TC-MV (Sample Cov.)", "2022-2024\n(Fallback)"])
+sharpe_noshort_ma2 = float(summary_table_period.loc["MV No Short-Sale (LW)", "2010-2021\n(MA2 Predictions)"])
+sharpe_tcmvlw_ma2 = float(summary_table_period.loc["TC-MV (Ledoit-Wolf)", "2010-2021\n(MA2 Predictions)"])
+sharpe_noshort_fallback = float(summary_table_period.loc["MV No Short-Sale (LW)", "2022-2024\n(Fallback)"])
+```
+
+
+The period breakdown reveals an important finding: during 2010–2021 when MA2 predictions are available, TC-MV (Sample) achieves a Sharpe ratio of `{python} f"{sharpe_tcmv_ma2:.3f}"`, substantially outperforming naive 1/N (`{python} f"{sharpe_naive_ma2:.3f}"`). This demonstrates that with good expected-return predictions, portfolio optimization can overcome estimation risk and transaction costs. However, in 2022–2024 when the strategy relies on the shrunk historical-mean fallback (MU_SHRINK = 0.05), naive 1/N (`{python} f"{sharpe_naive_fallback:.3f}"`) outperforms TC-MV (`{python} f"{sharpe_tcmv_fallback:.3f}"`). This reversal shows that weak or absent return signals favour the robustness of naive diversification; when expected returns are poorly estimated, optimization becomes harmful. Overall, TC-MV (Sample) edges out naive on a full-sample basis (`{python} f"{sharpe_tcmv_full:.3f}"` vs `{python} f"{sharpe_naive_full:.3f}"` Sharpe), but the period-by-period analysis reveals this advantage is entirely driven by the 2010–2021 period when ML predictions provide genuine signal.
+
+**Figure 3: Cumulative net-of-transaction-cost wealth from January 2010 to December 2024.**
+
+```{python}
+#| label: fig-cumulative-returns
+#| fig-pos: H
+
+fig, ax = plt.subplots(figsize=(6.5, 2.8))
+colors = ["#0072B2", "#E69F00", "#009E73", "#D55E00"]
+for (s, label), color in zip(strategy_labels.items(), colors):
+    net = result_dfs[s]["net_ret"]
+    cum = (1 + net).cumprod()
+    ax.plot(cum.index, cum.values, label=label, color=color, linewidth=1.2)
+ax.set_xlabel("Date")
+ax.set_ylabel("Cumulative wealth (start = 1)")
+ax.set_title("Cumulative Net-of-TC Returns: Jan 2010 – Dec 2024")
+ax.legend(fontsize=8)
+ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+plt.tight_layout()
+plt.savefig("fig_cumulative_returns.pdf", bbox_inches="tight")
+plt.show()
+```
+
+**Figure 4: Monthly portfolio turnover for each strategy during the out-of-sample period.**
+
+```{python}
+#| label: fig-turnover
+#| fig-pos: H
+fig, ax = plt.subplots(figsize=(6.5, 2.2))
+for (s, label), color in zip(strategy_labels.items(), colors):
+    to = result_dfs[s]["turnover"] * 100
+    ax.plot(result_dfs[s].index, to, label=label, color=color, linewidth=0.6, alpha=0.8)
+ax.set_xlabel("Date")
+ax.set_ylabel("Monthly Turnover (%)")
+ax.set_title("Portfolio Turnover over Time")
+ax.legend(fontsize=8)
+plt.tight_layout()
+plt.show()
+```
+
+## Discussion of Results
+The transaction-cost-adjusted mean-variance portfolio using the sample covariance achieves a Sharpe ratio of `{python} f"{sharpe_tcmv_full:.3f}"`, slightly outperforming the naive 1/N benchmark (`{python} f"{sharpe_naive_full:.3f}"`) over the full 2010–2024 period. However, the period-by-period breakdown reveals that this advantage is entirely driven by 2010–2021, when strong ML signals enable TC-MV to achieve `{python} f"{sharpe_tcmv_ma2:.3f}"` versus naive's `{python} f"{sharpe_naive_ma2:.3f}"`. In 2022–2024, when predictions rely on a shrunk historical mean, naive dominates (`{python} f"{sharpe_naive_fallback:.3f}"` vs `{python} f"{sharpe_tcmv_fallback:.3f}"`), confirming that optimization destroys value without reliable return forecasts. Regarding the choice of covariance estimator: the constrained MV (LW) achieves `{python} f"{sharpe_noshort_full:.3f}"`, nearly identical to naive, while the unconstrained LW strategy underperforms at `{python} f"{sharpe_tcmvlw_full:.3f}"`. This suggests that transaction-cost regularisation and covariance shrinkage are partially substitutable, but the substitution is incomplete when expected-return estimates are noisy.
+
+This is not a true out-of-sample experiment. The MA2 model was trained through 2021, so 2010–2021 is partially in-sample; only 2022–2024 (25% of the backtest) is truly out-of-sample. We also use a single fixed MA2 model rather than rolling estimation, and the parameter choices (λ, γ, window length) were made with knowledge of the full sample. The results should be interpreted as a controlled comparison of methods under identical conditions, not as an unbiased estimate of real-time returns. The central insight remains: optimization's value depends entirely on signal quality. When predictions are strong, better covariance conditioning enables it to overcome transaction costs. When signals are weak, naive diversification is more robust.
+
+## Exercise 6 – Guest Lecture Reflection and Practical Insights
+
+```{python}
+# Extract period-by-period Sharpe ratios for Exercise 6
+sharpe_tcmv_ma2 = float(summary_table_period.loc["TC-MV (Sample Cov.)", "2010-2021\n(MA2 Predictions)"])
+sharpe_naive_ma2 = float(summary_table_period.loc["Naïve 1/N", "2010-2021\n(MA2 Predictions)"])
+sharpe_tcmv_fallback = float(summary_table_period.loc["TC-MV (Sample Cov.)", "2022-2024\n(Fallback)"])
+sharpe_naive_fallback = float(summary_table_period.loc["Naïve 1/N", "2022-2024\n(Fallback)"])
+```
+
+Due to concurrent examination commitments, we were unable to attend Cilie Feldager's guest lecture. However, our assignment reinforces a key insight likely central to professional portfolio management practice: optimization is only valuable when expected-return forecasts are reliable. Our backtest demonstrates this principle empirically — transaction-cost-adjusted mean-variance optimization substantially outperforms naive diversification when ML predictions are strong (2010–2021, Sharpe `{python} f"{sharpe_tcmv_ma2:.3f}"` vs `{python} f"{sharpe_naive_ma2:.3f}"`), but loses decisively when signals weaken (2022–2024, Sharpe `{python} f"{sharpe_tcmv_fallback:.3f}"` vs `{python} f"{sharpe_naive_fallback:.3f}"`). This suggests that competitive advantage in asset management lies not in algorithmic sophistication, but in honest assessment of forecast quality and disciplined use of constraints — transaction costs, shrinkage, and diversification — to guard against overconfidence.
