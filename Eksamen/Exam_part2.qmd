@@ -675,7 +675,20 @@ for i in range(1, len(rc_days)):
 ```
 
 ### Exercise 3b: Ledoit-Wolf shrinkage estimator
-For the Ledoit-Wolf estimator, we first construct daily close-to-close log returns for all 30 stocks using the last observed intraday price on each trading day. For each evaluation day $t$, the Ledoit-Wolf covariance matrix is estimated from a rolling window of $W=252$ daily returns ending on day $t-1$. Thus, only information available before day $t$ is used. The resulting matrix is stored as $\hat{\Sigma}^{LW}_t$, and its diagonal elements are saved for the comparison in Exercise 3c.
+
+For the Ledoit-Wolf estimator, we first construct daily close-to-close log returns for all 30 stocks using the last observed intraday price on each trading day. Meaning, the estimator relies on daily return information, where the high-frequency estimator is constructed from realized covariance matrices based on intraday returns.
+
+For each evaluation day $t$, the Ledoit-Wolf covariance matrix is estimated from a rolling window of $W=252$ daily returns ending on day $t-1$. Let $S_t$ denote the sample covariance matrix computed from these $W$ daily returns. The Ledoit-Wolf shrinkage estimator is then given by
+
+$$
+\hat{\Sigma}^{LW}_t
+=
+\delta_t F_t
++
+(1-\delta_t)S_t,
+$$
+
+where $F_t$ is a structured shrinkage target and $\delta_t\in[0,1]$ denotes the shrinkage intensity. Thus, the estimator shrinks the sample covariance matrix towards a more stable target in order to reduce estimation error. We set $W=252$, corresponding to approximately one trading year. This provides a balance between estimation precision and adaptability: a shorter window would produce noisier covariance estimates that are more sensitive to individual observations, whereas a much longer window would react more slowly to changes in the covariance structure by placing greater weight on older data. A one-year rolling window is therefore a commonly used compromise in empirical finance when estimating covariance matrices from daily returns.Only information available before day $t$ is used. The resulting covariance matrix is stored as $\hat{\Sigma}^{LW}_t$, and its diagonal elements are saved for the comparison in Exercise 3c.
 
 ```{python}
 # Daily close-to-close returns for all 30 stocks
@@ -712,10 +725,14 @@ daily_returns = (
 W = 252
 
 lw_covariances = {}
+
+# for later we only use the variances, so we safe them here
 lw_variance_data = []
 
+#The list of all dates in daily returns
 daily_return_days = list(daily_returns.index)
 
+#We now first ensure that the trading day is in daily_return_days and also create the position of the trading_day in daily_returns
 for trading_day in evaluation_days:
     
     if trading_day not in daily_return_days:
@@ -726,9 +743,10 @@ for trading_day in evaluation_days:
     if pos < W:
         continue
     
-    # Rolling window ending on day t - 1
+    # Rolling window ending on day t - 1, so the 252 daily returns before trading_day
     window_returns = daily_returns.iloc[pos - W:pos]
     
+    # We here use the build-in python function for the ledoit wolf estimator. So python chooses the lambda size based on the data, and if this is very noisy the bigger the shrinkage.
     lw_model = LedoitWolf()
     lw_model.fit(window_returns.values)
     
@@ -868,8 +886,7 @@ fig.tight_layout(rect=[0, 0, 1, 0.92])
 
 plt.show()
 ```
-The figure shows that the realized variances are substantially more volatile than the Ledoit-Wolf implied variances. The realized variance series contain sharp daily spikes, especially during periods of market stress, because they are computed directly from intraday returns and therefore react immediately to short-run volatility shocks. In contrast, the Ledoit-Wolf estimates are much smoother and move more gradually over time. This reflects that the estimator is based on a 252-day rolling window of daily close-to-close returns and applies shrinkage to reduce estimation error. As argued by Ledoit and Wolf (2003, 2004), shrinkage pulls noisy and extreme covariance estimates towards a more stable target. The comparison therefore highlights the different smoothing properties of the two estimators: the realized variance estimator exhibits little smoothing and responds immediately to new information, whereas the Ledoit-Wolf estimator provides a smoother and more stable estimate of risk, but reacts more slowly to sudden changes in volatility.
-
+The figure shows that the realized variances are substantially more volatile than the Ledoit-Wolf implied variances. Because they are computed directly from intraday returns, the realized variances contain sharp daily spikes and respond immediately to short-run volatility shocks. A pronounced increase in variance is observed across almost all stocks around early 2020, reflecting the heightened market uncertainty during the COVID-19 pandemic. Both estimators capture this increase in risk, but the Ledoit-Wolf estimates remain considerably smoother because they are based on a 252-day rolling window of daily close-to-close returns and apply shrinkage to reduce estimation error. As argued by Ledoit and Wolf (2003, 2004), shrinkage pulls noisy and extreme covariance estimates towards a more stable target. Consequently, the realized variance estimator reacts immediately to new information, whereas the Ledoit-Wolf estimator provides a more stable estimate of risk but responds more gradually to sudden changes in volatility.
 
 ### Exercise 4: Minimum-variance portfolios
 
@@ -1216,7 +1233,6 @@ top_extreme_day = pd.to_datetime(
     top_extreme_position["trading_day"]
 ).strftime("%Y-%m-%d")
 ```
-
 
 ```{python}
 weights_long["weight"].describe()
