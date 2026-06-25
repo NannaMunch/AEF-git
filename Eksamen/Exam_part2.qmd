@@ -922,9 +922,7 @@ The resulting portfolio weights reflect how the different covariance estimators 
 
 
 ```{python}
-# ------------------------------------------------------------
-# Exercise 4: Minimum-variance portfolio weights
-# ------------------------------------------------------------
+# Exercise 4: Minimum-variance portfolio weights - we follow the given formula for minimum variance portfolio weigths and define this in the next code part. And create the vector of 1, that needs to be used for this. 
 
 def minimum_variance_weights(cov_matrix):
     """
