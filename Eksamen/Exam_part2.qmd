@@ -1437,11 +1437,9 @@ performance_summary["annualized_volatility_percent"] = (
 
 
 ```{python}
-#| results: asis
+from IPython.display import display
 
-# Table: out-of-sample performance
-
-performance_table_report = (
+performance_table = (
     performance_summary
     .loc[:, [
         "strategy",
@@ -1464,8 +1462,7 @@ performance_table_report = (
     })
 )
 
-print(performance_table_report.to_markdown(index=False))
-print("\n: Out-of-sample performance of the high-frequency, Ledoit-Wolf, and equal-weighted strategies. {#tbl-oos-performance}")
+display(performance_table.style.hide(axis="index"))
 ```
 
 To visualize the realized performance over time, we also plot cumulative out-of-sample returns. Since the portfolio returns are simple returns, cumulative returns are computed by compounding daily returns.
@@ -1520,17 +1517,17 @@ plt.show()
 
 perf_lookup = performance_summary.set_index("strategy")
 
-hf_vol = round(perf_lookup.loc["HF", "annualized_volatility_percent"], 2)
-lw_vol = round(perf_lookup.loc["LW", "annualized_volatility_percent"], 2)
-ew_vol = round(perf_lookup.loc["EW", "annualized_volatility_percent"], 2)
+hf_return = round(float(perf_lookup.loc["HF", "annualized_return_percent"]), 2)
+lw_return = round(float(perf_lookup.loc["LW", "annualized_return_percent"]), 2)
+ew_return = round(float(perf_lookup.loc["EW", "annualized_return_percent"]), 2)
 
-hf_sharpe = round(perf_lookup.loc["HF", "annualized_sharpe"], 3)
-lw_sharpe = round(perf_lookup.loc["LW", "annualized_sharpe"], 3)
-ew_sharpe = round(perf_lookup.loc["EW", "annualized_sharpe"], 3)
+hf_vol = round(float(perf_lookup.loc["HF", "annualized_volatility_percent"]), 2)
+lw_vol = round(float(perf_lookup.loc["LW", "annualized_volatility_percent"]), 2)
+ew_vol = round(float(perf_lookup.loc["EW", "annualized_volatility_percent"]), 2)
 
-hf_minus_lw_sharpe = round(hf_sharpe - lw_sharpe, 3)
-hf_minus_ew_sharpe = round(hf_sharpe - ew_sharpe, 3)
-lw_minus_ew_sharpe = round(lw_sharpe - ew_sharpe, 3)
+hf_sharpe = round(float(perf_lookup.loc["HF", "annualized_sharpe"]), 3)
+lw_sharpe = round(float(perf_lookup.loc["LW", "annualized_sharpe"]), 3)
+ew_sharpe = round(float(perf_lookup.loc["EW", "annualized_sharpe"]), 3)
 
 best_strategy = (
     performance_summary
@@ -1538,3 +1535,8 @@ best_strategy = (
     .iloc[0]["strategy"]
 )
 ```
+
+Table 5.1 and Figure 5 show that the high-frequency strategy does not provide a measurable out-of-sample advantage over the Ledoit-Wolf strategy. Although the high-frequency estimator achieves an annualized return of `{python} hf_return`%, this is only slightly higher than the `{python} lw_return`% obtained by the Ledoit-Wolf strategy. However, the high-frequency strategy also exhibits a higher annualized volatility (`{python} hf_vol`% versus `{python} lw_vol`%), resulting in a lower Sharpe ratio (`{python} hf_sharpe` compared with `{python} lw_sharpe`). The cumulative return plot supports this conclusion, as the Ledoit-Wolf strategy follows a smoother return path while achieving comparable cumulative performance. Overall, the results suggest that the additional intraday information embedded in the high-frequency covariance estimator does not translate into superior risk-adjusted portfolio performance in this application.
+
+## Overall assesment
+The results suggest that additional statistical sophistication does not automatically translate into superior portfolio performance. While high-frequency data can, in principle, improve covariance estimation, the benefits are only realized when the additional information meaningfully reduces estimation error and leads to more accurate portfolio weights. In this application, neither the high-frequency nor the Ledoit–Wolf estimator outperformed the simple $1/N$ benchmark on a risk-adjusted basis, illustrating the well-known result that naïve diversification is often difficult to beat out-of-sample. This highlights that more complex estimation methods increase model complexity but do not necessarily improve economic performance, emphasizing the importance of robust estimation rather than statistical sophistication alone.
