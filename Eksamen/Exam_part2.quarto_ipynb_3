@@ -31,7 +31,7 @@
         "    highlight-style: github-light\n",
         "---"
       ],
-      "id": "048c777f"
+      "id": "be2ce097"
     },
     {
       "cell_type": "code",
@@ -48,7 +48,7 @@
         "from IPython.display import Markdown\n",
         "from sklearn.covariance import LedoitWolf"
       ],
-      "id": "5162a856",
+      "id": "20f055e6",
       "execution_count": null,
       "outputs": []
     },
@@ -64,7 +64,7 @@
         "\n",
         "The use of generative AI tools is documented in the submitted GAI declaration."
       ],
-      "id": "c0f9dc3e"
+      "id": "741b5009"
     },
     {
       "cell_type": "code",
@@ -96,7 +96,7 @@
         "    \"\"\"\n",
         "    return pd.Timestamp(f\"{trading_day} {clock_time}\", tz=TS_TZ)"
       ],
-      "id": "35dee9ee",
+      "id": "39a9d689",
       "execution_count": null,
       "outputs": []
     },
@@ -106,7 +106,7 @@
       "source": [
         "## Exercise 1: Choice of realized variance estimator"
       ],
-      "id": "e029215b"
+      "id": "3aa57ace"
     },
     {
       "cell_type": "code",
@@ -123,7 +123,7 @@
         "# Compute log price because high-frequency realized variance is based on log returns\n",
         "aapl_raw[\"log_price\"] = np.log(aapl_raw[\"price\"])"
       ],
-      "id": "1b6cea22",
+      "id": "22dad4c0",
       "execution_count": null,
       "outputs": []
     },
@@ -187,7 +187,7 @@
         "\n",
         "overall_missing_share_percent = 100 * overall_missing_share"
       ],
-      "id": "64a744cc",
+      "id": "6e06b645",
       "execution_count": null,
       "outputs": []
     },
@@ -199,7 +199,7 @@
         "\n",
         "For each sampling interval $\\Delta \\in \\{1,2,5,10,15,30,60\\}$, prices are sampled at pre-specified timestamps relative to the market open, e.g. 09:30, 09:40 for 10-minute sampling. A bucket-based approach would instead typically use the last observed price within each interval, e.g. 09:39, 09:49 for 10-minute buckets. We use fixed-grid sampling to make the timing convention explicit and to ensure that intraday returns are aligned across stocks when constructing realized covariance matrices."
       ],
-      "id": "89eb8be9"
+      "id": "107a8d84"
     },
     {
       "cell_type": "code",
@@ -276,7 +276,7 @@
         "    .reset_index()\n",
         ")"
       ],
-      "id": "d78e3d9c",
+      "id": "ba05bd14",
       "execution_count": null,
       "outputs": []
     },
@@ -291,7 +291,7 @@
         "\n",
         "where $r_{d,j}^{(\\Delta)}$ is the intraday log return over sampling interval.\n"
       ],
-      "id": "817327e5"
+      "id": "dfdbfde9"
     },
     {
       "cell_type": "code",
@@ -350,7 +350,7 @@
         "\n",
         "    return rv_daily"
       ],
-      "id": "0a1113a6",
+      "id": "99cac4b1",
       "execution_count": null,
       "outputs": []
     },
@@ -369,7 +369,7 @@
         "    ignore_index=True\n",
         ")"
       ],
-      "id": "cd363d14",
+      "id": "cbe62e9f",
       "execution_count": null,
       "outputs": []
     },
@@ -394,7 +394,7 @@
         "rv_summary[\"ci_lower\"] = rv_summary[\"mean_rv\"] - 1.96 * rv_summary[\"se_rv\"]\n",
         "rv_summary[\"ci_upper\"] = rv_summary[\"mean_rv\"] + 1.96 * rv_summary[\"se_rv\"]"
       ],
-      "id": "ef1b8a21",
+      "id": "a79af1c6",
       "execution_count": null,
       "outputs": []
     },
@@ -404,7 +404,7 @@
       "source": [
         "As shown in @fig-aapl-volatility-signature, the average realized variance is highest at the shortest sampling intervals and falls substantially when moving from 1-minute to 5-minute sampling. This is consistent with market microstructure noise at very high frequencies. In the lecture slides, the observed log price is written as the latent efficient log price plus a noise component, $Y_{i\\Delta_n}=X_{i\\Delta_n}+U_{i\\Delta_n}$, and the noise-driven fraction of return variance increases as $\\Delta_n$ becomes small. Sampling less frequently therefore reduces the influence of bid-ask bounce, price discreteness and stale prices. However, very long sampling intervals discard useful intraday information."
       ],
-      "id": "99c88d97"
+      "id": "fdb38d24"
     },
     {
       "cell_type": "code",
@@ -466,7 +466,7 @@
         "\n",
         "For each trading day, the realized covariance matrix is obtained as the cross-product of synchronized intraday return vectors."
       ],
-      "id": "fbab55f0"
+      "id": "a2155cfa"
     },
     {
       "cell_type": "code",
@@ -589,7 +589,7 @@
         "\n",
         "rc_diagnostics = pd.DataFrame(rc_diagnostics)"
       ],
-      "id": "1fbfd9a2",
+      "id": "1be45f08",
       "execution_count": null,
       "outputs": []
     },
@@ -605,7 +605,7 @@
         "\n",
         "Thus, by extracting the diagonal of each daily realized covariance matrix, we obtain a time series of daily realized variance for each of the 30 stocks."
       ],
-      "id": "755d49ef"
+      "id": "1bae2ec8"
     },
     {
       "cell_type": "code",
@@ -635,7 +635,7 @@
         "    )\n",
         ")"
       ],
-      "id": "7f6ea896",
+      "id": "34c420a8",
       "execution_count": null,
       "outputs": []
     },
@@ -726,7 +726,7 @@
         "\n",
         "highest_market_wide_rv_date = pd.to_datetime(top_spike_days.index[0]).strftime(\"%Y-%m-%d\")\n"
       ],
-      "id": "93b3604a",
+      "id": "80cd3337",
       "execution_count": null,
       "outputs": []
     },
@@ -744,7 +744,7 @@
         "\n",
         "For each day $t$ in the second half of the sample, we construct two estimators of today’s covariance matrix using only information available up to day $t-1$."
       ],
-      "id": "22920fb7"
+      "id": "520ea9fb"
     },
     {
       "cell_type": "code",
@@ -759,7 +759,7 @@
         "eval_start = len(rc_days) // 2\n",
         "evaluation_days = rc_days[eval_start:]"
       ],
-      "id": "0e83997e",
+      "id": "35232577",
       "execution_count": null,
       "outputs": []
     },
@@ -776,7 +776,7 @@
         "\n",
         "Thus, yesterday’s realized covariance matrix is used as the forecast of today’s covariance matrix. This implies a random-walk assumption for covariance dynamics: conditional on information available at day $t-1$, today’s covariance is best approximated by yesterday’s realized covariance. The assumption is motivated by the persistence and clustering typically observed in volatility, but the estimator may be noisy because it relies only on the previous day."
       ],
-      "id": "17fe1c36"
+      "id": "44362260"
     },
     {
       "cell_type": "code",
@@ -795,7 +795,7 @@
         "    \n",
         "    hf_covariances[trading_day] = rc_matrices[previous_day]"
       ],
-      "id": "75d200da",
+      "id": "4773ec99",
       "execution_count": null,
       "outputs": []
     },
@@ -808,7 +808,7 @@
         "\n",
         "The Ledoit-Wolf estimator shrinks the sample covariance matrix toward a structured target, reducing estimation error and improving the stability of the covariance matrix used for portfolio construction [@Ledoit.2003; @Ledoit.2004]. The resulting matrix is stored as $\\hat{\\Sigma}^{LW}_t$, and its diagonal elements are used in the comparison in Exercise 3c."
       ],
-      "id": "76cd31b7"
+      "id": "3bbd6f49"
     },
     {
       "cell_type": "code",
@@ -841,7 +841,7 @@
         "    .dropna(how=\"any\")\n",
         ")"
       ],
-      "id": "83f56f8c",
+      "id": "398fd101",
       "execution_count": null,
       "outputs": []
     },
@@ -892,7 +892,7 @@
         "lw_variances = pd.DataFrame(lw_variance_data)\n",
         "lw_variances[\"trading_day\"] = pd.to_datetime(lw_variances[\"trading_day\"])"
       ],
-      "id": "57a6a54c",
+      "id": "8e185661",
       "execution_count": null,
       "outputs": []
     },
@@ -904,7 +904,7 @@
         "\n",
         "To compare the smoothing properties of the two estimators, we focus on the diagonal elements of the covariance matrices. For each stock $i$, we compare the Ledoit-Wolf implied variance, $\\hat{\\Sigma}^{LW}{t,ii}$, with the realized variance, $RC{t,ii}$, from Exercise 2b."
       ],
-      "id": "6057b4a3"
+      "id": "103f6b41"
     },
     {
       "cell_type": "code",
@@ -929,7 +929,7 @@
         "    )\n",
         ")"
       ],
-      "id": "fcac8ad0",
+      "id": "9644ec76",
       "execution_count": null,
       "outputs": []
     },
@@ -939,7 +939,7 @@
       "source": [
         "As shown in @fig-lw-vs-realized-variance, the realized variances are much more volatile than the Ledoit-Wolf implied variances. The realized variance series contain sharp daily spikes because they are computed directly from intraday returns and react immediately to short-run volatility shocks. In contrast, the Ledoit-Wolf estimates are smoother and move more gradually over time, reflecting the 252-day rolling window and the use of shrinkage. This is consistent with the purpose of Ledoit-Wolf shrinkage, which is to reduce estimation error by pulling noisy covariance estimates toward a more stable target [@Ledoit.2003; @Ledoit.2004]. Thus, the comparison shows that realized variances react quickly to new information, while Ledoit-Wolf provides a more stable but slower-moving estimate of risk."
       ],
-      "id": "ca7eb820"
+      "id": "31e7b0de"
     },
     {
       "cell_type": "code",
@@ -1037,7 +1037,10 @@
       "source": [
         "### Exercise 4: Minimum-variance portfolios\n",
         "\n",
-        "Using the covariance forecasts from Exercise 3, we compute daily unconstrained minimum-variance portfolios for both the high-frequency random-walk estimator, $\\hat{\\Sigma}^{HF}_t$, and the Ledoit-Wolf estimator, $\\hat{\\Sigma}^{LW}_t$. For a given covariance estimate $\\hat{\\Sigma}_t$, the portfolio solves:\n",
+        "Using the covariance matrix forecasts constructed in Exercise 3, we form daily minimum-variance portfolios for the evaluation period. Specifically, we compute portfolio weights based on both the high-frequency random-walk estimator, $\\hat{\\Sigma}^{HF}_t$, and the Ledoit-Wolf shrinkage estimator, $\\hat{\\Sigma}^{LW}_t$.\n",
+        "\n",
+        "For a given covariance matrix estimate $\\hat{\\Sigma}_t$, the minimum-variance portfolio is obtained by solving\n",
+        "\n",
         "$$\n",
         "\\omega_{mvp,t}\n",
         "=\n",
@@ -1049,18 +1052,23 @@
         "\\quad\n",
         "\\text{s.t.}\n",
         "\\quad\n",
-        "\\iota'\\omega_t = 1,\n",
+        "\\iota'\\omega_t = 1.\n",
         "$$\n",
         "\n",
-        "which gives the closed-form solution\n",
+        "Solving the first-order conditions yields the closed-form solution\n",
+        "\n",
         "$$\n",
+        "\\omega_{mvp,t}\n",
+        "=\n",
         "\\frac{\\hat{\\Sigma}_t^{-1}\\iota}\n",
         "{\\iota'\\hat{\\Sigma}_t^{-1}\\iota},\n",
         "$$\n",
         "\n",
-        "where $\\iota$ is a vector of ones. Comparing the resulting weights shows how the two covariance estimators translate into portfolio allocations and rebalancing needs."
+        "where $\\iota$ denotes a vector of ones.\n",
+        "\n",
+        "The resulting portfolio weights reflect how the different covariance estimators translate into portfolio allocations. Since the high-frequency estimator is based on the most recent realized covariance matrix, it is expected to react more strongly to short-run fluctuations in covariance. In contrast, the Ledoit-Wolf estimator uses a rolling window of daily returns and shrinkage, which may lead to more stable covariance estimates and therefore more stable portfolio weights. We compare the resulting portfolio allocations, identify the most extreme positions, and evaluate the average turnover between rebalancing dates.\n"
       ],
-      "id": "b0cbb26e"
+      "id": "4e72f474"
     },
     {
       "cell_type": "code",
@@ -1098,7 +1106,7 @@
         "    \n",
         "    return weights"
       ],
-      "id": "6f94b9ef",
+      "id": "2641c32c",
       "execution_count": null,
       "outputs": []
     },
@@ -1145,7 +1153,7 @@
         "weights_long = pd.DataFrame(weight_data)\n",
         "weights_long[\"trading_day\"] = pd.to_datetime(weights_long[\"trading_day\"])"
       ],
-      "id": "08117852",
+      "id": "d0ab981f",
       "execution_count": null,
       "outputs": []
     },
@@ -1153,6 +1161,7 @@
       "cell_type": "code",
       "metadata": {},
       "source": [
+        "# \n",
         "# Sanity check: portfolio weights should sum to one - the printed output of this gives us the max deviation from the budget constraint is 4.44×10−16, which is effectively zero and only reflects numerical rounding errors. Hence, all portfolio weights satisfy the constraint that they sum to one.\n",
         "\n",
         "weight_sums = (\n",
@@ -1166,7 +1175,7 @@
         "    np.abs(weight_sums[\"weight\"] - 1)\n",
         ")"
       ],
-      "id": "4efbc848",
+      "id": "8b24d778",
       "execution_count": null,
       "outputs": []
     },
@@ -1186,7 +1195,7 @@
         "    .sort_index()\n",
         ")"
       ],
-      "id": "67bc3b31",
+      "id": "5baaf850",
       "execution_count": null,
       "outputs": []
     },
@@ -1252,9 +1261,9 @@
       "cell_type": "markdown",
       "metadata": {},
       "source": [
-        "As shown in @fig-min-var-weights, the high-frequency estimator produces more variable portfolio weights across stocks and rebalancing dates, while the Ledoit-Wolf estimator gives smoother and more persistent allocations. This reflects that the high-frequency estimator reacts directly to the previous day’s realized covariance matrix, whereas the Ledoit-Wolf estimator is based on a rolling window and shrinkage.\n"
+        "Figure 4 illustrates the minimum-variance portfolio weights obtained from the two covariance estimators over the evaluation period. The high-frequency estimator produces substantially more variable portfolio weights across both stocks and rebalancing dates, whereas the Ledoit-Wolf estimator results in smoother and more persistent portfolio allocations. This reflects the greater stability of the shrinkage covariance estimates compared with the more volatile realized covariance matrices.\n"
       ],
-      "id": "4fc4d9ea"
+      "id": "b7170d3b"
     },
     {
       "cell_type": "code",
@@ -1275,7 +1284,7 @@
         "    .copy()\n",
         ")"
       ],
-      "id": "db2e5736",
+      "id": "40aae7ea",
       "execution_count": null,
       "outputs": []
     },
@@ -1371,9 +1380,9 @@
       "cell_type": "markdown",
       "metadata": {},
       "source": [
-        "Tables @tbl-hf-extreme-positions and @tbl-lw-extreme-positions report the ten largest absolute portfolio weights for each estimator. The high-frequency strategy generates the most extreme positions, with the largest absolute weight equal to {python} top_extreme_abs_weight% for {python} top_extreme_stock on {python} top_extreme_day. In contrast, the Ledoit-Wolf weights are more moderate, illustrating how shrinkage leads to more stable portfolio allocations.\n",
+        "Tables 1 and 2 report the ten largest absolute portfolio weights for each covariance estimator. The high-frequency strategy produces considerably more extreme positions, with several portfolio weights exceeding 100% in absolute value, implying substantial leverage and short-selling. In contrast, the Ledoit-Wolf estimator generates much smaller extreme positions, with the largest weight around 43%. This illustrates how the shrinkage estimator produces more stable covariance estimates, leading to more moderate portfolio allocations.\n",
         "\n",
-        "The final part of the analysis evaluates how much the portfolio weights change between consecutive rebalancing dates. We measure rebalancing activity by daily turnover:\n",
+        "The final part of the analysis evaluates how much the portfolio weights change between consecutive rebalancing dates. This is measured by the average turnover,\n",
         "\n",
         "$$\n",
         "\\frac{1}{T}\n",
@@ -1384,7 +1393,7 @@
         "\n",
         "Turnover therefore measures how much trading is required to adjust the portfolio from one day to the next. A higher turnover indicates less stable portfolio weights and greater trading activity, whereas a lower turnover indicates more persistent portfolio allocations."
       ],
-      "id": "a091d768"
+      "id": "0c97e87a"
     },
     {
       "cell_type": "code",
@@ -1431,7 +1440,7 @@
         "    100 * turnover_summary[\"max_turnover\"]\n",
         ")"
       ],
-      "id": "96234e6c",
+      "id": "7566a823",
       "execution_count": null,
       "outputs": []
     },
@@ -1439,9 +1448,7 @@
       "cell_type": "code",
       "metadata": {},
       "source": [
-        "#| label: tbl-turnover\n",
-        "#| tbl-cap: Turnover of the high-frequency and Ledoit-Wolf minimum-variance portfolios.\n",
-        "#| echo: false\n",
+        "# Table 4.3: Average turnover between daily rebalances\n",
         "\n",
         "turnover_table = (\n",
         "    turnover_summary[\n",
@@ -1469,7 +1476,7 @@
         "    \"Max turnover (%)\": 2\n",
         "})"
       ],
-      "id": "tbl-turnover",
+      "id": "fc05b07c",
       "execution_count": null,
       "outputs": []
     },
@@ -1521,7 +1528,7 @@
         "    top_extreme_position[\"trading_day\"]\n",
         ").strftime(\"%Y-%m-%d\")"
       ],
-      "id": "d2479ceb",
+      "id": "b70139a9",
       "execution_count": null,
       "outputs": []
     },
@@ -1529,9 +1536,9 @@
       "cell_type": "markdown",
       "metadata": {},
       "source": [
-        "As shown in @tbl-turnover, the high-frequency strategy has much higher average turnover than the Ledoit-Wolf strategy, with `{python} hf_avg_turnover`% compared with `{python} lw_avg_turnover`%. This reflects that the high-frequency covariance estimator reacts more strongly to new intraday information, while the Ledoit-Wolf estimator produces smoother covariance forecasts. The Ledoit-Wolf strategy would therefore require less rebalancing and likely incur lower transaction costs in practice.\n"
+        "Table 4.3 shows that the high-frequency strategy has substantially higher turnover than the Ledoit-Wolf strategy, with an average daily turnover of `{python} hf_avg_turnover`% compared with only `{python} lw_avg_turnover`%. This difference follows directly from the covariance estimators used to construct the portfolios. The high-frequency strategy is based on realized covariance matrices that react immediately to new intraday information, causing the estimated covariance matrix and the corresponding minimum-variance weights to change considerably from one trading day to the next. In contrast, the Ledoit-Wolf estimator combines a 252-day rolling window with shrinkage, producing smoother covariance forecasts and therefore much more stable portfolio weights. Consequently, the Ledoit-Wolf strategy requires substantially less rebalancing and would therefore be expected to incur lower transaction costs in practice.\n"
       ],
-      "id": "8912f82a"
+      "id": "9c9c5b93"
     }
   ],
   "metadata": {
