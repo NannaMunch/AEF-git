@@ -6,7 +6,6 @@ date-format: MMMM DD, YYYY
 execute: 
   echo: false
   warning: false
-  cache: true
 format:
   pdf: 
     titlepage: true
@@ -957,11 +956,10 @@ def minimum_variance_weights(cov_matrix):
 ```
 
 ```{python}
-# ------------------------------------------------------------
 # Compute minimum-variance weights for both covariance estimators
-# ------------------------------------------------------------
+#This code is the core of Exercise 4. It applies the minimum-variance portfolio formula to the covariance matrix forecasts from Exercise 3 and computes daily portfolio weights based on both the high-frequency and Ledoit-Wolf covariance estimators. The resulting weights are stored in a single dataset (weights_long), which is subsequently used to analyse portfolio allocations, visualize the weights, identify extreme positions, and calculate portfolio turnover.
 
-# Use only days where both covariance estimators are available
+# Use only days where both covariance estimators are available - this is just a reassurement
 common_weight_days = sorted(
     set(hf_covariances.keys()).intersection(set(lw_covariances.keys()))
 )
@@ -970,11 +968,11 @@ weight_data = []
 
 for trading_day in common_weight_days:
     
-    # High-frequency random-walk covariance estimator
+    # High-frequency random-walk covariance estimator - using the definition from above and the data from 3a
     sigma_hf = hf_covariances[trading_day].loc[symbols, symbols]
     weights_hf = minimum_variance_weights(sigma_hf)
     
-    # Ledoit-Wolf covariance estimator
+    # Ledoit-Wolf covariance estimator - using the definition from above and the data from 3b
     sigma_lw = lw_covariances[trading_day].loc[symbols, symbols]
     weights_lw = minimum_variance_weights(sigma_lw)
     
@@ -999,9 +997,8 @@ weights_long["trading_day"] = pd.to_datetime(weights_long["trading_day"])
 ```
 
 ```{python}
-# ------------------------------------------------------------
-# Sanity check: portfolio weights should sum to one
-# ------------------------------------------------------------
+# 
+# Sanity check: portfolio weights should sum to one - the printed output of this gives us the max deviation from the budget constraint is 4.44×10−16, which is effectively zero and only reflects numerical rounding errors. Hence, all portfolio weights satisfy the constraint that they sum to one.
 
 weight_sums = (
     weights_long
@@ -1013,12 +1010,11 @@ weight_sums = (
 max_weight_sum_error = np.max(
     np.abs(weight_sums["weight"] - 1)
 )
+
 ```
 
 ```{python}
-# ------------------------------------------------------------
-# Convert weights to wide format for plotting and turnover
-# ------------------------------------------------------------
+# Convert weights to wide format for plotting and turnover - as this format is easier to use later on
 
 weights_wide = (
     weights_long
@@ -1039,9 +1035,7 @@ weights_wide = (
 #| fig-width: 12
 #| fig-height: 8
 
-# ------------------------------------------------------------
-# Visualise minimum-variance weights
-# ------------------------------------------------------------
+# Visualise minimum-variance weights - we use a heatmap of the two different strategies
 
 fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
@@ -1084,59 +1078,115 @@ axes[-1].set_xlabel("Trading day")
 plt.show()
 ```
 
-```{python}
-# ------------------------------------------------------------
-# Most extreme portfolio positions
-# ------------------------------------------------------------
+Figure 4 illustrates the minimum-variance portfolio weights obtained from the two covariance estimators over the evaluation period. The high-frequency estimator produces substantially more variable portfolio weights across both stocks and rebalancing dates, whereas the Ledoit-Wolf estimator results in smoother and more persistent portfolio allocations. This reflects the greater stability of the shrinkage covariance estimates compared with the more volatile realized covariance matrices.
 
-extreme_positions = (
+
+```{python}
+# Most extreme portfolio positions by strategy - used to make two tables, one for the most extreme HF weigths and one for the 10 most extreme LW weight
+
+extreme_positions_by_strategy = (
     weights_long
     .assign(
         abs_weight=lambda x: x["weight"].abs(),
-        weight_percent=lambda x: 100 * x["weight"]
+        weight_percent=lambda x: 100 * x["weight"],
+        abs_weight_percent=lambda x: 100 * x["weight"].abs()
     )
-    .sort_values("abs_weight", ascending=False)
+    .sort_values(["strategy", "abs_weight"], ascending=[True, False])
+    .groupby("strategy")
     .head(10)
     .copy()
 )
 ```
 ```{python}
-# ------------------------------------------------------------
-# Table: most extreme positions
-# ------------------------------------------------------------
+#| label: tbl-hf-extreme-positions
+#| tbl-cap: "Ten most extreme minimum-variance portfolio positions based on the high-frequency covariance estimator."
+#| echo: false
 
-extreme_positions_table = (
-    extreme_positions
+extreme_positions_hf_table = (
+    extreme_positions_by_strategy
+    .query("strategy == 'HF'")
     [
         [
             "trading_day",
             "strategy",
             "symbol",
             "weight_percent",
-            "abs_weight"
+            "abs_weight_percent"
         ]
     ]
-    .reset_index(drop=True)       # Fjerner de gamle indeksnumre
     .rename(columns={
         "trading_day": "Trading day",
         "strategy": "Strategy",
         "symbol": "Stock",
         "weight_percent": "Weight (%)",
-        "abs_weight": "Absolute weight"
+        "abs_weight_percent": "Absolute weight (%)"
+    })
+    .round({
+        "Weight (%)": 2,
+        "Absolute weight (%)": 2
     })
 )
 
-extreme_positions_table.round({
-    "Weight (%)": 2,
-    "Absolute weight": 4
-})
+extreme_positions_hf_table["Trading day"] = (
+    pd.to_datetime(extreme_positions_hf_table["Trading day"])
+    .dt.strftime("%Y-%m-%d")
+)
+
+extreme_positions_hf_table
+```
+```{python}
+#| label: tbl-lw-extreme-positions
+#| tbl-cap: "Ten most extreme minimum-variance portfolio positions based on the Ledoit-Wolf covariance estimator."
+#| echo: false
+
+extreme_positions_lw_table = (
+    extreme_positions_by_strategy
+    .query("strategy == 'LW'")
+    [
+        [
+            "trading_day",
+            "strategy",
+            "symbol",
+            "weight_percent",
+            "abs_weight_percent"
+        ]
+    ]
+    .rename(columns={
+        "trading_day": "Trading day",
+        "strategy": "Strategy",
+        "symbol": "Stock",
+        "weight_percent": "Weight (%)",
+        "abs_weight_percent": "Absolute weight (%)"
+    })
+    .round({
+        "Weight (%)": 2,
+        "Absolute weight (%)": 2
+    })
+)
+
+extreme_positions_lw_table["Trading day"] = (
+    pd.to_datetime(extreme_positions_lw_table["Trading day"])
+    .dt.strftime("%Y-%m-%d")
+)
+
+extreme_positions_lw_table
 ```
 
-```{python}
-# ------------------------------------------------------------
-# Average turnover between rebalances
-# ------------------------------------------------------------
+Tables 1 and 2 report the ten largest absolute portfolio weights for each covariance estimator. The high-frequency strategy produces considerably more extreme positions, with several portfolio weights exceeding 100% in absolute value, implying substantial leverage and short-selling. In contrast, the Ledoit-Wolf estimator generates much smaller extreme positions, with the largest weight around 43%. This illustrates how the shrinkage estimator produces more stable covariance estimates, leading to more moderate portfolio allocations.
 
+The final part of the analysis evaluates how much the portfolio weights change between consecutive rebalancing dates. This is measured by the average turnover,
+
+$$
+\frac{1}{T}
+\sum_t
+\sum_i
+|\omega_{i,t+1}-\omega_{i,t}|.
+$$
+
+Turnover therefore measures how much trading is required to adjust the portfolio from one day to the next. A higher turnover indicates less stable portfolio weights and greater trading activity, whereas a lower turnover indicates more persistent portfolio allocations.
+
+```{python}
+# Average turnover between rebalances - so we find the change in weigths (average) between two trading days.
 turnover_data = []
 
 for strategy in ["HF", "LW"]:
@@ -1179,9 +1229,7 @@ turnover_summary["max_turnover_percent"] = (
 ```
 
 ```{python}
-# ------------------------------------------------------------
-# Table: average turnover
-# ------------------------------------------------------------
+# Table 4.3: Average turnover between daily rebalances
 
 turnover_table = (
     turnover_summary[
@@ -1211,38 +1259,52 @@ turnover_table.round({
 ```
 
 ```{python}
-# ------------------------------------------------------------
-# Dynamic values for text interpretation
-# ------------------------------------------------------------
+# Creating all dynamic values for text interpretation
 
 turnover_lookup = turnover_summary.set_index("strategy")
 
-hf_avg_turnover = turnover_lookup.loc["HF", "average_turnover_percent"]
-lw_avg_turnover = turnover_lookup.loc["LW", "average_turnover_percent"]
+# Turnover statistics (already rounded for inline text)
+hf_avg_turnover = round(
+    turnover_lookup.loc["HF", "average_turnover_percent"], 2
+)
 
-hf_median_turnover = turnover_lookup.loc["HF", "median_turnover_percent"]
-lw_median_turnover = turnover_lookup.loc["LW", "median_turnover_percent"]
+lw_avg_turnover = round(
+    turnover_lookup.loc["LW", "average_turnover_percent"], 2
+)
 
-top_extreme_position = extreme_positions.iloc[0]
+hf_median_turnover = round(
+    turnover_lookup.loc["HF", "median_turnover_percent"], 2
+)
+
+lw_median_turnover = round(
+    turnover_lookup.loc["LW", "median_turnover_percent"], 2
+)
+
+hf_max_turnover = round(
+    turnover_lookup.loc["HF", "max_turnover_percent"], 2
+)
+
+lw_max_turnover = round(
+    turnover_lookup.loc["LW", "max_turnover_percent"], 2
+)
+
+# Most extreme portfolio position
+top_extreme_position = extreme_positions_by_strategy.iloc[0]
 
 top_extreme_strategy = top_extreme_position["strategy"]
 top_extreme_stock = top_extreme_position["symbol"]
-top_extreme_weight = 100 * top_extreme_position["weight"]
-top_extreme_abs_weight = abs(top_extreme_weight)
+top_extreme_weight = round(
+    100 * top_extreme_position["weight"], 2
+)
+top_extreme_abs_weight = round(
+    abs(100 * top_extreme_position["weight"]), 2
+)
 top_extreme_day = pd.to_datetime(
     top_extreme_position["trading_day"]
 ).strftime("%Y-%m-%d")
 ```
 
-```{python}
-weights_long["weight"].describe()
-````
-
-
-
-
-
-
+Table 4.3 shows that the high-frequency strategy has substantially higher turnover than the Ledoit-Wolf strategy, with an average daily turnover of `{python} hf_avg_turnover`% compared with only `{python} lw_avg_turnover`%. This difference follows directly from the covariance estimators used to construct the portfolios. The high-frequency strategy is based on realized covariance matrices that react immediately to new intraday information, causing the estimated covariance matrix and the corresponding minimum-variance weights to change considerably from one trading day to the next. In contrast, the Ledoit-Wolf estimator combines a 252-day rolling window with shrinkage, producing smoother covariance forecasts and therefore much more stable portfolio weights. Consequently, the Ledoit-Wolf strategy requires substantially less rebalancing and would therefore be expected to incur lower transaction costs in practice.
 
 
 
