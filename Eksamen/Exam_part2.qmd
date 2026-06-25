@@ -675,7 +675,20 @@ for i in range(1, len(rc_days)):
 ```
 
 ### Exercise 3b: Ledoit-Wolf shrinkage estimator
-For the Ledoit-Wolf estimator, we first construct daily close-to-close log returns for all 30 stocks using the last observed intraday price on each trading day. For each evaluation day $t$, the Ledoit-Wolf covariance matrix is estimated from a rolling window of $W=252$ daily returns ending on day $t-1$. Thus, only information available before day $t$ is used. The resulting matrix is stored as $\hat{\Sigma}^{LW}_t$, and its diagonal elements are saved for the comparison in Exercise 3c.
+
+For the Ledoit-Wolf estimator, we first construct daily close-to-close log returns for all 30 stocks using the last observed intraday price on each trading day. Meaning, the estimator relies on daily return information, where the high-frequency estimator is constructed from realized covariance matrices based on intraday returns.
+
+For each evaluation day $t$, the Ledoit-Wolf covariance matrix is estimated from a rolling window of $W=252$ daily returns ending on day $t-1$. Let $S_t$ denote the sample covariance matrix computed from these $W$ daily returns. The Ledoit-Wolf shrinkage estimator is then given by
+
+$$
+\hat{\Sigma}^{LW}_t
+=
+\delta_t F_t
++
+(1-\delta_t)S_t,
+$$
+
+where $F_t$ is a structured shrinkage target and $\delta_t\in[0,1]$ denotes the shrinkage intensity. Thus, the estimator shrinks the sample covariance matrix towards a more stable target in order to reduce estimation error. We set $W=252$, corresponding to approximately one trading year. This provides a balance between estimation precision and adaptability: a shorter window would produce noisier covariance estimates that are more sensitive to individual observations, whereas a much longer window would react more slowly to changes in the covariance structure by placing greater weight on older data. A one-year rolling window is therefore a commonly used compromise in empirical finance when estimating covariance matrices from daily returns.Only information available before day $t$ is used. The resulting covariance matrix is stored as $\hat{\Sigma}^{LW}_t$, and its diagonal elements are saved for the comparison in Exercise 3c.
 
 ```{python}
 # Daily close-to-close returns for all 30 stocks
@@ -712,10 +725,14 @@ daily_returns = (
 W = 252
 
 lw_covariances = {}
+
+# for later we only use the variances, so we safe them here
 lw_variance_data = []
 
+#The list of all dates in daily returns
 daily_return_days = list(daily_returns.index)
 
+#We now first ensure that the trading day is in daily_return_days and also create the position of the trading_day in daily_returns
 for trading_day in evaluation_days:
     
     if trading_day not in daily_return_days:
@@ -726,9 +743,10 @@ for trading_day in evaluation_days:
     if pos < W:
         continue
     
-    # Rolling window ending on day t - 1
+    # Rolling window ending on day t - 1, so the 252 daily returns before trading_day
     window_returns = daily_returns.iloc[pos - W:pos]
     
+    # We here use the build-in python function for the ledoit wolf estimator. So python chooses the lambda size based on the data, and if this is very noisy the bigger the shrinkage.
     lw_model = LedoitWolf()
     lw_model.fit(window_returns.values)
     
@@ -868,9 +886,7 @@ fig.tight_layout(rect=[0, 0, 1, 0.92])
 
 plt.show()
 ```
-
-The figure shows that the realized variances are substantially more volatile than the Ledoit-Wolf implied variances. The realized variance series contain sharp daily spikes, especially during periods of market stress, because they are computed directly from intraday returns and therefore react immediately to short-run volatility shocks. In contrast, the Ledoit-Wolf estimates are much smoother and move more gradually over time. This reflects that the estimator is based on a 252-day rolling window of daily close-to-close returns and applies shrinkage to reduce estimation error. As argued by Ledoit and Wolf (2003, 2004), shrinkage pulls noisy and extreme covariance estimates towards a more stable target. The comparison therefore highlights the different smoothing properties of the two estimators: the realized variance estimator exhibits little smoothing and responds immediately to new information, whereas the Ledoit-Wolf estimator provides a smoother and more stable estimate of risk, but reacts more slowly to sudden changes in volatility.
-
+The figure shows that the realized variances are substantially more volatile than the Ledoit-Wolf implied variances. Because they are computed directly from intraday returns, the realized variances contain sharp daily spikes and respond immediately to short-run volatility shocks. A pronounced increase in variance is observed across almost all stocks around early 2020, reflecting the heightened market uncertainty during the COVID-19 pandemic. Both estimators capture this increase in risk, but the Ledoit-Wolf estimates remain considerably smoother because they are based on a 252-day rolling window of daily close-to-close returns and apply shrinkage to reduce estimation error. As argued by Ledoit and Wolf (2003, 2004), shrinkage pulls noisy and extreme covariance estimates towards a more stable target. Consequently, the realized variance estimator reacts immediately to new information, whereas the Ledoit-Wolf estimator provides a more stable estimate of risk but responds more gradually to sudden changes in volatility.
 
 ### Exercise 4: Minimum-variance portfolios
 
@@ -1218,262 +1234,11 @@ top_extreme_day = pd.to_datetime(
 ).strftime("%Y-%m-%d")
 ```
 
-
 ```{python}
 weights_long["weight"].describe()
-```
-
-## Exercise 5
-```{python}
-# ------------------------------------------------------------
-# Exercise 5: Out-of-sample portfolio returns
-# ------------------------------------------------------------
-
-# Convert daily return index to datetime to match weights
-daily_returns_eval = daily_returns.copy()
-daily_returns_eval.index = pd.to_datetime(daily_returns_eval.index)
-
-# Trading days where portfolio weights are available
-weight_days = (
-    weights_long["trading_day"]
-    .drop_duplicates()
-    .sort_values()
-)
-
-# Use only days where we have both weights and realized daily returns
-oos_days = sorted(
-    set(weight_days).intersection(set(daily_returns_eval.index))
-)
-
-# Keep returns for the relevant stocks and evaluation days
-daily_returns_oos = daily_returns_eval.loc[oos_days, symbols].copy()
-```
+````
 
 
-```{python}
-# Construct realized out-of-sample portfolio returns
-portfolio_return_data = []
-
-# Equal-weight vector
-n_stocks = len(symbols)
-equal_weights = np.repeat(1 / n_stocks, n_stocks)
-
-# Convert log returns to simple returns for the realized portfolio return.
-# A portfolio return is a weighted average of SIMPLE returns; this matters most
-# for the high-leverage HF weights.
-simple_returns_oos = np.expm1(daily_returns_oos)
-
-for trading_day in oos_days:
-    
-    # Realized daily close-to-close SIMPLE return vector on day t
-    realized_simple = simple_returns_oos.loc[trading_day, symbols].to_numpy()
-    
-    # High-frequency and Ledoit-Wolf minimum-variance strategies
-    for strategy in ["HF", "LW"]:
-        
-        weights_t = (
-            weights_wide
-            .loc[(strategy, trading_day), symbols]
-            .to_numpy()
-        )
-        
-        portfolio_return_data.append({
-            "trading_day": trading_day,
-            "strategy": strategy,
-            "portfolio_return": weights_t @ realized_simple
-        })
-    
-    # Equal-weighted benchmark
-    portfolio_return_data.append({
-        "trading_day": trading_day,
-        "strategy": "Equal-weighted",
-        "portfolio_return": equal_weights @ realized_simple
-    })
-
-portfolio_returns = pd.DataFrame(portfolio_return_data)
-portfolio_returns["trading_day"] = pd.to_datetime(portfolio_returns["trading_day"])
-```
-
-```{python}
-# Annualized volatility and Sharpe ratio
-TRADING_DAYS_PER_YEAR = 252
-
-performance_summary = (
-    portfolio_returns
-    .groupby("strategy")
-    .agg(
-        mean_daily_return=("portfolio_return", "mean"),
-        daily_volatility=("portfolio_return", "std"),
-        n_days=("portfolio_return", "count")
-    )
-    .reset_index()
-)
-
-performance_summary["annualized_return"] = (
-    TRADING_DAYS_PER_YEAR * performance_summary["mean_daily_return"]
-)
-
-performance_summary["annualized_volatility"] = (
-    np.sqrt(TRADING_DAYS_PER_YEAR) * performance_summary["daily_volatility"]
-)
-
-performance_summary["annualized_sharpe"] = (
-    performance_summary["annualized_return"]
-    / performance_summary["annualized_volatility"]
-)
-
-performance_summary["annualized_return_percent"] = (
-    100 * performance_summary["annualized_return"]
-)
-
-performance_summary["annualized_volatility_percent"] = (
-    100 * performance_summary["annualized_volatility"]
-)
-```
-
-```{python}
-#| label: tbl-oos-performance
-#| tbl-cap: "Out-of-sample performance of the high-frequency, Ledoit-Wolf, and equal-weighted strategies."
-
-performance_table = (
-    performance_summary[
-        [
-            "strategy",
-            "annualized_return_percent",
-            "annualized_volatility_percent",
-            "annualized_sharpe"
-        ]
-    ]
-    .copy()
-    .rename(columns={
-        "strategy": "Strategy",
-        "annualized_return_percent": "Annualized return (%)",
-        "annualized_volatility_percent": "Annualized volatility (%)",
-        "annualized_sharpe": "Annualized Sharpe ratio"
-    })
-    .round({
-        "Ann. return (%)": 2,
-        "Ann. volatility (%)": 2,
-        "Ann. Sharpe ratio": 3
-    })
-)
-
-Markdown(performance_table.round(4).to_markdown(index=False))
-```
-
-```{python}
-#| label: fig-oos-cumulative-returns
-#| fig-cap: "Cumulative out-of-sample portfolio returns for the high-frequency, Ledoit-Wolf, and equal-weighted strategies."
-#| fig-align: center
-#| fig-pos: "H"
-
-
-# Plot cumulative out-of-sample returns
-portfolio_returns_plot = (
-    portfolio_returns
-    .sort_values(["strategy", "trading_day"])
-    .copy()
-)
-
-# Returns are simple returns, so cumulative returns are compounded
-portfolio_returns_plot["cumulative_return"] = (
-    portfolio_returns_plot
-    .groupby("strategy")["portfolio_return"]
-    .apply(lambda r: (1 + r).cumprod() - 1)
-    .reset_index(level=0, drop=True)
-)
-
-fig, ax = plt.subplots(figsize=(10, 5))
-
-for strategy in ["HF", "LW", "EW"]:
-    
-    temp = portfolio_returns_plot[
-        portfolio_returns_plot["strategy"] == strategy
-    ]
-    
-    ax.plot(
-        temp["trading_day"],
-        temp["cumulative_return"],
-        linewidth=1.2,
-        label=strategy
-    )
-
-ax.set_xlabel("Trading day")
-ax.set_ylabel("Cumulative return")
-ax.set_title("Out-of-sample cumulative portfolio returns")
-ax.grid(True, alpha=0.3)
-ax.legend()
-
-fig.tight_layout()
-plt.show()
-```
-
-```{python}
-
-# Dynamic values for Exercise 5 interpretation
-perf_lookup = performance_summary.set_index("strategy")
-
-hf_vol = perf_lookup.loc["HF", "annualized_volatility_percent"]
-lw_vol = perf_lookup.loc["LW", "annualized_volatility_percent"]
-ew_vol = perf_lookup.loc["EW", "annualized_volatility_percent"]
-
-hf_sharpe = perf_lookup.loc["HF", "annualized_sharpe"]
-lw_sharpe = perf_lookup.loc["LW", "annualized_sharpe"]
-ew_sharpe = perf_lookup.loc["EW", "annualized_sharpe"]
-
-hf_minus_lw_sharpe = hf_sharpe - lw_sharpe
-hf_minus_ew_sharpe = hf_sharpe - ew_sharpe
-lw_minus_ew_sharpe = lw_sharpe - ew_sharpe
-
-best_strategy = (
-    performance_summary
-    .sort_values("annualized_sharpe", ascending=False)
-    .iloc[0]["strategy"]
-)
-```
-
-@tbl-oos-performance reports the out-of-sample results. The Ledoit-Wolf strategy attains the
-lowest annualized volatility at `{python} f"{lw_vol:.2f}"`\% with a Sharpe ratio of
-`{python} f"{lw_sharpe:.3f}"`, whereas the high-frequency strategy is both more volatile, at
-`{python} f"{hf_vol:.2f}"`\%, and lower-Sharpe, at `{python} f"{hf_sharpe:.3f}"`. The
-equal-weighted benchmark has the highest volatility, `{python} f"{ew_vol:.2f}"`\%, but also
-the highest Sharpe ratio at `{python} f"{ew_sharpe:.3f}"`.
-
-The high-frequency estimator therefore does not deliver a measurable advantage over Ledoit-Wolf
-shrinkage [@ledoit.2003; @ledoit.2004]. On the contrary, it is dominated on both dimensions: it is
-more volatile and has a lower Sharpe ratio than the shrinkage estimator, even before trading
-costs are taken into account. This is notable given that both are minimum-variance portfolios:
-Ledoit-Wolf achieves the lowest realized volatility of all three strategies, exactly as the
-minimum-variance objective intends, while the high-frequency estimator does not. The difference
-is the same instability documented in Exercise 4, where the high-frequency strategy rebalanced
-with an average turnover of roughly 349\% against only 7\% for Ledoit-Wolf. Once realistic
-transaction costs are accounted for, the small amount of risk the high-frequency estimator does
-remove would be far outweighed by the cost of its trading, so the richer intraday information it
-exploits is not translated into an economically meaningful improvement. As seen in
-@fig-oos-cumulative-returns, the high-frequency strategy also displays the most violent swings
-in cumulative return, including a sharp drawdown in 2025, while Ledoit-Wolf is the smoothest of
-the three.
-
-The broader result is that neither optimized strategy beats the naive equal-weighted benchmark
-on a risk-adjusted basis: the benchmark, which estimates nothing and therefore carries no
-estimation error, attains the highest Sharpe ratio of the three. Whether an estimator that
-exploits additional information — intraday returns, shrinkage targets, or factor structures —
-improves on equal weighting depends on whether its reduction in estimation error outweighs the
-noise it introduces through the inversion of the covariance matrix. As emphasised in the
-in-class discussion and in the shrinkage literature [@ledoit2004], the sample covariance matrix
-is poorly conditioned when the number of assets is large relative to the sample, and imposing
-structure can substantially improve out-of-sample behaviour; this is precisely why Ledoit-Wolf
-outperforms the high-frequency estimator here. We would expect sophistication to pay off when
-the sample is long relative to the number of assets, when the covariance structure is stable and
-persistent so that past estimates forecast future risk well, and when turnover is controlled or
-trading costs are low. The minimum-variance problem with thirty assets and a covariance matrix
-re-estimated daily sits at the opposite end of this spectrum: estimation error dominates,
-structure (Ledoit-Wolf) helps more than extra information (high-frequency data), and even then
-the simplest possible rule is hard to beat. Our evidence suggests that statistical sophistication
-is valuable in portfolio choice mainly insofar as it stabilises the inputs to optimisation, and
-that sophistication which merely increases responsiveness — as with the daily-updated
-high-frequency estimator — does not reliably beat a simple benchmark once realistic frictions are
-considered.
 
 
 
