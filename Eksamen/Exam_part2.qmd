@@ -922,9 +922,7 @@ The resulting portfolio weights reflect how the different covariance estimators 
 
 
 ```{python}
-# ------------------------------------------------------------
-# Exercise 4: Minimum-variance portfolio weights
-# ------------------------------------------------------------
+# Exercise 4: Minimum-variance portfolio weights - we follow the given formula for minimum variance portfolio weigths and define this in the next code part. And create the vector of 1, that needs to be used for this. 
 
 def minimum_variance_weights(cov_matrix):
     """
@@ -1307,17 +1305,238 @@ top_extreme_day = pd.to_datetime(
 Table 4.3 shows that the high-frequency strategy has substantially higher turnover than the Ledoit-Wolf strategy, with an average daily turnover of `{python} hf_avg_turnover`% compared with only `{python} lw_avg_turnover`%. This difference follows directly from the covariance estimators used to construct the portfolios. The high-frequency strategy is based on realized covariance matrices that react immediately to new intraday information, causing the estimated covariance matrix and the corresponding minimum-variance weights to change considerably from one trading day to the next. In contrast, the Ledoit-Wolf estimator combines a 252-day rolling window with shrinkage, producing smoother covariance forecasts and therefore much more stable portfolio weights. Consequently, the Ledoit-Wolf strategy requires substantially less rebalancing and would therefore be expected to incur lower transaction costs in practice.
 
 
+### Exercise 5: Out-of-sample portfolio returns
+We now evaluate the realized out-of-sample performance of the portfolio weights constructed in Exercise 4. For each trading day $t$ in the evaluation window, the realized portfolio return is computed as
+
+$$
+R_{p,t}=\omega_t'R_t,
+$$
+
+where $\omega_t$ is the vector of portfolio weights and $R_t$ is the vector of realized daily simple returns on day $t$. We compute realized portfolio returns for the high-frequency strategy, the Ledoit-Wolf strategy, and an equal-weighted benchmark.
+
+```{python}
+# Exercise 5: Out-of-sample portfolio returns - this code part is making the dataset ready to be used to calculate the actual portfolio returns later on
+
+# Convert daily return index to datetime to match portfolio weights
+daily_returns_eval = daily_returns.copy()
+daily_returns_eval.index = pd.to_datetime(daily_returns_eval.index)
+
+# Trading days where portfolio weights are available
+weight_days = (
+    weights_long["trading_day"]
+    .drop_duplicates()
+    .sort_values()
+)
+
+# Use only days where we have both portfolio weights and realized daily returns
+oos_days = sorted(
+    set(weight_days).intersection(set(daily_returns_eval.index))
+)
+
+# Keep realized returns for the relevant stocks and out-of-sample days
+daily_returns_oos = daily_returns_eval.loc[oos_days, symbols].copy()
+```
+
+Since portfolio returns are weighted averages of asset returns, we convert the daily log returns into simple returns before applying the portfolio weights. This is particularly important for the high-frequency strategy, which may contain leveraged long and short positions.
+
+```{python}
+# Construct realized out-of-sample portfolio returns - we use this new dataset later on in this exercise 5
+
+portfolio_return_data = []
+
+# Equal-weight vector
+n_stocks = len(symbols)
+equal_weights = np.repeat(1 / n_stocks, n_stocks)
+
+# Convert log returns to simple returns
+simple_returns_oos = np.expm1(daily_returns_oos)
+
+for trading_day in oos_days:
+    
+    # Realized daily simple return vector on day t
+    realized_simple = simple_returns_oos.loc[trading_day, symbols].to_numpy()
+    
+    # Minimum-variance strategies based on HF and LW covariance forecasts
+    for strategy in ["HF", "LW"]:
+        
+        weights_t = (
+            weights_wide
+            .loc[(strategy, trading_day), symbols]
+            .to_numpy()
+        )
+        
+        portfolio_return_data.append({
+            "trading_day": trading_day,
+            "strategy": strategy,
+            "portfolio_return": weights_t @ realized_simple
+        })
+    
+    # Equal-weighted benchmark
+    portfolio_return_data.append({
+        "trading_day": trading_day,
+        "strategy": "EW",
+        "portfolio_return": equal_weights @ realized_simple
+    })
+
+portfolio_returns = pd.DataFrame(portfolio_return_data)
+portfolio_returns["trading_day"] = pd.to_datetime(portfolio_returns["trading_day"])
+```
+
+We evaluate the realized out-of-sample performance of the three strategies by computing annualized volatility and annualized Sharpe ratios. Since the risk-free rate is assumed to be zero, the Sharpe ratio is computed as
+
+$$
+SR =
+\frac{252 \cdot \bar{R}_p}
+{\sqrt{252}\cdot \sigma(R_p)}.
+$$
+
+Annualized volatility is computed as
+$$
+\sigma_{p,ann}
+=
+\sqrt{252}\cdot \sigma(R_p).
+$$
+
+```{python}
+# Annualized volatility and Sharpe ratio
+
+TRADING_DAYS_PER_YEAR = 252
+
+performance_summary = (
+    portfolio_returns
+    .groupby("strategy")
+    .agg(
+        mean_daily_return=("portfolio_return", "mean"),
+        daily_volatility=("portfolio_return", "std"),
+        n_days=("portfolio_return", "count")
+    )
+    .reset_index()
+)
+
+performance_summary["annualized_return"] = (
+    TRADING_DAYS_PER_YEAR * performance_summary["mean_daily_return"]
+)
+
+performance_summary["annualized_volatility"] = (
+    np.sqrt(TRADING_DAYS_PER_YEAR) * performance_summary["daily_volatility"]
+)
+
+performance_summary["annualized_sharpe"] = (
+    performance_summary["annualized_return"]
+    / performance_summary["annualized_volatility"]
+)
+
+performance_summary["annualized_return_percent"] = (
+    100 * performance_summary["annualized_return"]
+)
+
+performance_summary["annualized_volatility_percent"] = (
+    100 * performance_summary["annualized_volatility"]
+)
+```
 
 
+```{python}
+from IPython.display import display
 
+performance_table = (
+    performance_summary
+    .loc[:, [
+        "strategy",
+        "annualized_return_percent",
+        "annualized_volatility_percent",
+        "annualized_sharpe",
+        "n_days"
+    ]]
+    .rename(columns={
+        "strategy": "Strategy",
+        "annualized_return_percent": "Ann. return (%)",
+        "annualized_volatility_percent": "Ann. volatility (%)",
+        "annualized_sharpe": "Ann. Sharpe ratio",
+        "n_days": "Days"
+    })
+    .round({
+        "Ann. return (%)": 2,
+        "Ann. volatility (%)": 2,
+        "Ann. Sharpe ratio": 3
+    })
+)
 
+display(performance_table.style.hide(axis="index"))
+```
 
+To visualize the realized performance over time, we also plot cumulative out-of-sample returns. Since the portfolio returns are simple returns, cumulative returns are computed by compounding daily returns.
 
+```{python}
+#| label: fig-oos-cumulative-returns
+#| fig-cap: "Cumulative out-of-sample portfolio returns for the high-frequency, Ledoit-Wolf, and equal-weighted strategies."
+#| fig-align: center
+#| fig-pos: "H"
 
+# Plot cumulative out-of-sample returns
 
+portfolio_returns_plot = (
+    portfolio_returns
+    .sort_values(["strategy", "trading_day"])
+    .copy()
+)
 
+portfolio_returns_plot["cumulative_return"] = (
+    portfolio_returns_plot
+    .groupby("strategy")["portfolio_return"]
+    .transform(lambda r: (1 + r).cumprod() - 1)
+)
 
+fig, ax = plt.subplots(figsize=(10, 5))
 
+for strategy in ["HF", "LW", "EW"]:
+    
+    temp = portfolio_returns_plot[
+        portfolio_returns_plot["strategy"] == strategy
+    ]
+    
+    ax.plot(
+        temp["trading_day"],
+        temp["cumulative_return"],
+        linewidth=1.2,
+        label=strategy
+    )
 
+ax.set_xlabel("Trading day")
+ax.set_ylabel("Cumulative return")
+ax.set_title("Out-of-sample cumulative portfolio returns")
+ax.grid(True, alpha=0.3)
+ax.legend()
 
+fig.tight_layout()
+plt.show()
+```
 
+```{python}
+# Dynamic values for Exercise 5 interpretation
+
+perf_lookup = performance_summary.set_index("strategy")
+
+hf_return = round(float(perf_lookup.loc["HF", "annualized_return_percent"]), 2)
+lw_return = round(float(perf_lookup.loc["LW", "annualized_return_percent"]), 2)
+ew_return = round(float(perf_lookup.loc["EW", "annualized_return_percent"]), 2)
+
+hf_vol = round(float(perf_lookup.loc["HF", "annualized_volatility_percent"]), 2)
+lw_vol = round(float(perf_lookup.loc["LW", "annualized_volatility_percent"]), 2)
+ew_vol = round(float(perf_lookup.loc["EW", "annualized_volatility_percent"]), 2)
+
+hf_sharpe = round(float(perf_lookup.loc["HF", "annualized_sharpe"]), 3)
+lw_sharpe = round(float(perf_lookup.loc["LW", "annualized_sharpe"]), 3)
+ew_sharpe = round(float(perf_lookup.loc["EW", "annualized_sharpe"]), 3)
+
+best_strategy = (
+    performance_summary
+    .sort_values("annualized_sharpe", ascending=False)
+    .iloc[0]["strategy"]
+)
+```
+
+Table 5.1 and Figure 5 show that the high-frequency strategy does not provide a measurable out-of-sample advantage over the Ledoit-Wolf strategy. Although the high-frequency estimator achieves an annualized return of `{python} hf_return`%, this is only slightly higher than the `{python} lw_return`% obtained by the Ledoit-Wolf strategy. However, the high-frequency strategy also exhibits a higher annualized volatility (`{python} hf_vol`% versus `{python} lw_vol`%), resulting in a lower Sharpe ratio (`{python} hf_sharpe` compared with `{python} lw_sharpe`). The cumulative return plot supports this conclusion, as the Ledoit-Wolf strategy follows a smoother return path while achieving comparable cumulative performance. Overall, the results suggest that the additional intraday information embedded in the high-frequency covariance estimator does not translate into superior risk-adjusted portfolio performance in this application.
+
+## Overall assesment
+The results suggest that additional statistical sophistication does not automatically translate into superior portfolio performance. While high-frequency data can, in principle, improve covariance estimation, the benefits are only realized when the additional information meaningfully reduces estimation error and leads to more accurate portfolio weights. In this application, neither the high-frequency nor the Ledoit–Wolf estimator outperformed the simple $1/N$ benchmark on a risk-adjusted basis, illustrating the well-known result that naïve diversification is often difficult to beat out-of-sample. This highlights that more complex estimation methods increase model complexity but do not necessarily improve economic performance, emphasizing the importance of robust estimation rather than statistical sophistication alone.
